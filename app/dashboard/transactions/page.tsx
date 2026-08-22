@@ -14,7 +14,6 @@ import {
   useGetSettingsQuery,
 } from '@/lib/api';
 import { transactionSchema } from '@/lib/schemas';
-import { Pagination } from '@/components/pagination';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -35,13 +34,14 @@ import {
   Search,
   ChevronDown,
   ChevronUp,
-  Filter,
   Check,
   Wallet,
-  ArrowRight,
   UserCheck,
   UserX,
   Sparkles,
+  Layers,
+  ArrowRight,
+  TrendingUp,
 } from 'lucide-react';
 
 const MONTH_NAMES = [
@@ -54,32 +54,22 @@ export default function TransactionsPage() {
   const staff = canManageTransactions(user);
   const isSuperAdmin = user?.role?.name === 'super_admin';
 
-  // Toggle View State: 'created' (Ledger Records) vs 'members_status' (Pending / Complete by Member)
+  // Toggle View: 'created' (Created Demands & Progress) vs 'members_status' (Per-Member Matrix)
   const [activeTab, setActiveTab] = useState<'created' | 'members_status'>('created');
 
-  // Tab 1: Created Transactions Ledger State
-  const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(15);
-  const [type, setType] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
+  // Tab 1: Created Demands Filters & State
+  const [createdStatusFilter, setCreatedStatusFilter] = useState<'all' | 'pending' | 'complete'>('all');
+  const [createdSearch, setCreatedSearch] = useState('');
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
 
   // Tab 2: Members Dues Matrix State
   const [memberStatusFilter, setMemberStatusFilter] = useState<'all' | 'pending' | 'cleared'>('all');
   const [memberSearch, setMemberSearch] = useState('');
   const [expandedMembers, setExpandedMembers] = useState<Record<number, boolean>>({});
 
-  // RTK Query hooks
-  const { data: pagedData, isLoading: loadingPaged } = useGetTransactionsQuery({
-    page,
-    per_page: perPage,
-    type: type || undefined,
-    status: statusFilter || undefined,
-  });
-
-  // Fetch broader dataset for member dues calculation and summary statistics
+  // Query all transactions for full progress & member computation
   const { data: allTrxData, isLoading: loadingAllTrx } = useGetTransactionsQuery({
-    per_page: 2000,
+    per_page: 3000,
   });
 
   const [createTransaction, { isLoading: isCreatingSingle }] = useCreateTransactionMutation();
@@ -191,7 +181,7 @@ export default function TransactionsPage() {
   };
 
   const handleMarkAsPaid = async (trxId: number) => {
-    if (!confirm('Mark this pending transaction as PAID and completed?')) return;
+    if (!confirm('Mark this transaction as PAID and collected?')) return;
     try {
       await updateTransaction({
         id: trxId,
@@ -211,11 +201,49 @@ export default function TransactionsPage() {
     setOpenDemand(true);
   };
 
+  const toggleExpandGroup = (groupKey: string) => {
+    setExpandedGroups((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }));
+  };
+
   const toggleExpandMember = (memberId: number) => {
     setExpandedMembers((prev) => ({ ...prev, [memberId]: !prev[memberId] }));
   };
 
-  // Pre-calculate member payment matrices
+  // Helper to extract last modifier (admin / super admin)
+  const getModifierInfo = (t: Transaction | any) => {
+    if (t.last_modified_by && typeof t.last_modified_by === 'object') {
+      return {
+        name: t.last_modified_by.name,
+        role: t.last_modified_by.role || 'Admin',
+        action: t.last_modified_by.action || 'Created',
+      };
+    }
+
+    if (t.updated_by) {
+      if (typeof t.updated_by === 'object') {
+        return {
+          name: t.updated_by.name,
+          role: t.updated_by.role || 'Admin',
+          action: 'Updated',
+        };
+      }
+      return { name: String(t.updated_by), role: 'Admin', action: 'Updated' };
+    }
+
+    if (t.created_by) {
+      if (typeof t.created_by === 'object') {
+        return {
+          name: t.created_by.name,
+          role: t.created_by.role || 'Admin',
+          action: 'Created',
+        };
+      }
+      return { name: String(t.created_by), role: 'Admin', action: 'Created' };
+    }
+
+    return { name: 'Super Admin', role: 'super_admin', action: 'Created' };
+  };
+
   const membersList = useMemo(() => {
     const rawUsers = usersData?.data || [];
     return rawUsers.filter((u) => u.role?.name === 'member');
@@ -225,7 +253,123 @@ export default function TransactionsPage() {
     return allTrxData?.data || [];
   }, [allTrxData]);
 
-  // Member-wise calculation
+  // =========================================================================
+  // VIEW 1 DATA: Group transactions into created billing campaigns / demands
+  // =========================================================================
+  const createdDemandGroups = useMemo(() => {
+    const groups: Record<string, {
+      key: string;
+      title: string;
+      category: string;
+      month?: string;
+      perMemberAmount: number;
+      dueDate: string;
+      created_at: string;
+      updated_at?: string;
+      last_modified_by?: any;
+      transactions: Transaction[];
+    }> = {};
+
+    allTransactions.forEach((t) => {
+      let groupKey = '';
+      if (t.payment_category === 'monthly_payment' && t.month) {
+        groupKey = `monthly_${t.month}_${t.amount}`;
+      } else if (t.payment_category === 'one_time') {
+        groupKey = `onetime_${t.description || t.type}_${t.amount}_${t.transaction_date}`;
+      } else if (t.month) {
+        groupKey = `monthly_${t.month}_${t.amount}`;
+      } else {
+        groupKey = `record_${t.type}_${t.description || ''}_${t.transaction_date}_${t.amount}_${(t.created_at || '').slice(0, 10)}`;
+      }
+
+      if (!groups[groupKey]) {
+        let title = t.description || 'Society Payment Demand';
+        if (t.payment_category === 'monthly_payment' && t.month) {
+          title = `Monthly Subscription (${t.month})`;
+        } else if (t.month) {
+          title = `Subscription for ${t.month}`;
+        } else if (t.payment_category === 'one_time' && t.description) {
+          title = t.description;
+        }
+
+        groups[groupKey] = {
+          key: groupKey,
+          title,
+          category: t.payment_category || t.type,
+          month: t.month,
+          perMemberAmount: Number(t.amount) || 0,
+          dueDate: t.transaction_date,
+          created_at: t.created_at,
+          updated_at: t.updated_at,
+          last_modified_by: t.last_modified_by || t.updated_by || t.created_by,
+          transactions: [],
+        };
+      }
+
+      groups[groupKey].transactions.push(t);
+      if (t.updated_at && (!groups[groupKey].updated_at || t.updated_at > groups[groupKey].updated_at!)) {
+        groups[groupKey].updated_at = t.updated_at;
+        if (t.last_modified_by) {
+          groups[groupKey].last_modified_by = t.last_modified_by;
+        }
+      }
+    });
+
+    const groupList = Object.values(groups).map((g) => {
+      const totalMembersAssigned = g.transactions.length;
+      const paidCount = g.transactions.filter((t) => t.status === 'paid').length;
+      const pendingCount = g.transactions.filter((t) => t.status === 'pending').length;
+      const totalDemandAmount = g.transactions.reduce((sum, t) => sum + Number(t.amount || 0), 0);
+      const totalCollectedAmount = g.transactions
+        .filter((t) => t.status === 'paid')
+        .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+      const progressPercent = totalMembersAssigned > 0
+        ? Math.round((paidCount / totalMembersAssigned) * 100)
+        : 100;
+      const isFullyPaid = paidCount === totalMembersAssigned && totalMembersAssigned > 0;
+
+      return {
+        ...g,
+        totalMembersAssigned,
+        paidCount,
+        pendingCount,
+        totalDemandAmount,
+        totalCollectedAmount,
+        progressPercent,
+        isFullyPaid,
+      };
+    });
+
+    return groupList.sort((a, b) => {
+      const dateA = a.updated_at || a.created_at || a.dueDate || '';
+      const dateB = b.updated_at || b.created_at || b.dueDate || '';
+      return dateB.localeCompare(dateA);
+    });
+  }, [allTransactions]);
+
+  // Filtered Created Records for View 1
+  const filteredCreatedGroups = useMemo(() => {
+    return createdDemandGroups.filter((g) => {
+      if (createdStatusFilter === 'pending' && g.isFullyPaid) return false;
+      if (createdStatusFilter === 'complete' && !g.isFullyPaid) return false;
+
+      if (createdSearch.trim()) {
+        const q = createdSearch.toLowerCase();
+        const modifier = getModifierInfo(g);
+        const titleMatch = g.title.toLowerCase().includes(q);
+        const monthMatch = g.month?.toLowerCase().includes(q);
+        const catMatch = g.category.toLowerCase().includes(q);
+        const adminMatch = modifier.name.toLowerCase().includes(q) || modifier.role.toLowerCase().includes(q);
+        return titleMatch || monthMatch || catMatch || adminMatch;
+      }
+
+      return true;
+    });
+  }, [createdDemandGroups, createdStatusFilter, createdSearch]);
+
+  // =========================================================================
+  // VIEW 2 DATA: Member-wise calculation
+  // =========================================================================
   const memberMatrix = useMemo(() => {
     const trxByMember: Record<number, Transaction[]> = {};
 
@@ -283,11 +427,9 @@ export default function TransactionsPage() {
   // Filtered members for Tab 2
   const filteredMembers = useMemo(() => {
     return memberMatrix.filter((m) => {
-      // Status filter
       if (memberStatusFilter === 'pending' && !m.hasPending) return false;
       if (memberStatusFilter === 'cleared' && m.hasPending) return false;
 
-      // Search filter
       if (memberSearch.trim()) {
         const q = memberSearch.toLowerCase();
         const nameMatch = m.member.name.toLowerCase().includes(q);
@@ -301,58 +443,6 @@ export default function TransactionsPage() {
     });
   }, [memberMatrix, memberStatusFilter, memberSearch]);
 
-  // Helper to extract last modifier (admin / super admin)
-  const getModifierInfo = (t: Transaction) => {
-    if (t.last_modified_by && typeof t.last_modified_by === 'object') {
-      return {
-        name: t.last_modified_by.name,
-        role: t.last_modified_by.role || 'Admin',
-        action: t.last_modified_by.action || 'Created',
-      };
-    }
-
-    if (t.updated_by) {
-      if (typeof t.updated_by === 'object') {
-        return {
-          name: t.updated_by.name,
-          role: t.updated_by.role || 'Admin',
-          action: 'Updated',
-        };
-      }
-      return { name: t.updated_by, role: 'Admin', action: 'Updated' };
-    }
-
-    if (t.created_by) {
-      if (typeof t.created_by === 'object') {
-        return {
-          name: t.created_by.name,
-          role: t.created_by.role || 'Admin',
-          action: 'Created',
-        };
-      }
-      return { name: t.created_by, role: 'Admin', action: 'Created' };
-    }
-
-    return { name: 'Super Admin', role: 'super_admin', action: 'Created' };
-  };
-
-  // Filtered transactions for Tab 1 search
-  const displayedTransactions = useMemo(() => {
-    const list = pagedData?.data || [];
-    if (!searchQuery.trim()) return list;
-
-    const q = searchQuery.toLowerCase();
-    return list.filter((t) => {
-      const modifier = getModifierInfo(t);
-      const noMatch = t.transaction_no.toLowerCase().includes(q);
-      const modifierMatch = modifier.name.toLowerCase().includes(q) || modifier.role.toLowerCase().includes(q);
-      const descMatch = t.description?.toLowerCase().includes(q);
-      const monthMatch = t.month?.toLowerCase().includes(q);
-      const typeMatch = t.type?.toLowerCase().includes(q);
-      return noMatch || modifierMatch || descMatch || monthMatch || typeMatch;
-    });
-  }, [pagedData, searchQuery]);
-
   return (
     <div className="space-y-5">
       {/* Top Header */}
@@ -360,7 +450,7 @@ export default function TransactionsPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Transactions & Billing</h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            Manage created ledger records, assign monthly & one-time dues, and track member payment statuses.
+            Manage created fee campaigns, monitor real-time member payment progress lines, and view per-member dues.
           </p>
         </div>
         {staff && (
@@ -401,12 +491,12 @@ export default function TransactionsPage() {
               : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
           }`}
         >
-          <CreditCard className="h-4 w-4" />
+          <Layers className="h-4 w-4" />
           <span>Transactions & Created Records</span>
           <span className={`text-[11px] px-2 py-0.2 rounded-full font-bold ${
             activeTab === 'created' ? 'bg-emerald-950/80 text-emerald-200' : 'bg-slate-200 text-slate-700'
           }`}>
-            {pagedData?.meta?.total ?? pagedData?.data?.length ?? 0}
+            {createdDemandGroups.length} Campaigns
           </span>
         </button>
 
@@ -433,28 +523,28 @@ export default function TransactionsPage() {
       </div>
 
       {/* =========================================================================
-          VIEW 1: TRANSACTIONS & CREATED RECORDS
+          VIEW 1: TRANSACTIONS & CREATED RECORDS (WITH MEMBER PROGRESS LINES)
           ========================================================================= */}
       {activeTab === 'created' && (
         <div className="space-y-4">
           {/* Quick Metrics Bar */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="p-3.5 bg-white border border-slate-200 rounded-xl shadow-2xs">
-              <span className="text-[11px] uppercase tracking-wider font-bold text-slate-500 block">Total Ledger Entries</span>
+              <span className="text-[11px] uppercase tracking-wider font-bold text-slate-500 block">Total Created Fee Campaigns</span>
               <div className="text-xl font-bold text-slate-900 mt-0.5">
-                {pagedData?.meta?.total ?? pagedData?.data?.length ?? 0} Records
+                {createdDemandGroups.length} Billing Demands
               </div>
             </div>
 
             <div className="p-3.5 bg-emerald-50/60 border border-emerald-200 rounded-xl shadow-2xs">
-              <span className="text-[11px] uppercase tracking-wider font-bold text-emerald-800 block">Page Total Value</span>
+              <span className="text-[11px] uppercase tracking-wider font-bold text-emerald-800 block">Total Collected to Date</span>
               <div className="text-xl font-bold text-emerald-900 mt-0.5">
-                BDT {pagedData?.summary?.page_total?.toLocaleString() ?? 0}
+                BDT {stats.totalCollected.toLocaleString()}
               </div>
             </div>
 
             <div className="p-3.5 bg-amber-50/60 border border-amber-200 rounded-xl shadow-2xs">
-              <span className="text-[11px] uppercase tracking-wider font-bold text-amber-800 block">Outstanding Pending Total</span>
+              <span className="text-[11px] uppercase tracking-wider font-bold text-amber-800 block">Total Outstanding Pending</span>
               <div className="text-xl font-bold text-amber-900 mt-0.5">
                 BDT {stats.totalPending.toLocaleString()}
               </div>
@@ -462,171 +552,279 @@ export default function TransactionsPage() {
           </div>
 
           {/* Filter Strip */}
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="relative flex-1 min-w-[200px]">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                onClick={() => setCreatedStatusFilter('all')}
+                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                  createdStatusFilter === 'all'
+                    ? 'bg-slate-900 text-white'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                All Created Demands ({createdDemandGroups.length})
+              </button>
+
+              <button
+                onClick={() => setCreatedStatusFilter('pending')}
+                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
+                  createdStatusFilter === 'pending'
+                    ? 'bg-amber-600 text-white shadow-2xs'
+                    : 'bg-amber-100/80 text-amber-900 hover:bg-amber-200'
+                }`}
+              >
+                <Clock className="h-3 w-3" />
+                Pending Collection ({createdDemandGroups.filter((g) => !g.isFullyPaid).length})
+              </button>
+
+              <button
+                onClick={() => setCreatedStatusFilter('complete')}
+                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
+                  createdStatusFilter === 'complete'
+                    ? 'bg-emerald-700 text-white shadow-2xs'
+                    : 'bg-emerald-100/80 text-emerald-900 hover:bg-emerald-200'
+                }`}
+              >
+                <CheckCircle2 className="h-3 w-3" />
+                Fully Completed ({createdDemandGroups.filter((g) => g.isFullyPaid).length})
+              </button>
+            </div>
+
+            <div className="relative w-full sm:w-72">
               <Search className="h-4 w-4 absolute left-3 top-2.5 text-slate-400" />
               <Input
-                placeholder="Search transaction no, member, description..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 bg-white text-sm h-9 border-slate-200"
+                placeholder="Search by demand title, admin, month..."
+                value={createdSearch}
+                onChange={(e) => setCreatedSearch(e.target.value)}
+                className="pl-9 bg-slate-50 text-xs h-9"
               />
-            </div>
-
-            <div className="w-44">
-              <select
-                className="w-full border border-slate-200 rounded-md px-3 py-1.5 bg-white text-xs h-9 text-slate-700 font-medium cursor-pointer"
-                value={type}
-                onChange={(e) => { setType(e.target.value); setPage(1); }}
-              >
-                <option value="">All Types</option>
-                {['payment', 'share', 'fdr', 'expense', 'other'].map((t) => (
-                  <option key={t} value={t} className="capitalize">{t}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="w-36">
-              <select
-                className="w-full border border-slate-200 rounded-md px-3 py-1.5 bg-white text-xs h-9 text-slate-700 font-medium cursor-pointer"
-                value={statusFilter}
-                onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
-              >
-                <option value="">All Statuses</option>
-                <option value="paid">Paid Only</option>
-                <option value="pending">Pending Only</option>
-              </select>
             </div>
           </div>
 
-          {/* Transaction Table */}
+          {/* Created Demands Table with Real-Time Progress Lines */}
           <Card className="border-slate-200 shadow-xs overflow-hidden">
             <CardContent className="p-0">
               <Table>
                 <TableHeader className="bg-slate-50/80">
                   <TableRow>
-                    <TableHead className="font-bold text-slate-900">Transaction No</TableHead>
+                    <TableHead className="font-bold text-slate-900">Billing Demand / Record</TableHead>
                     <TableHead className="font-bold text-slate-900">Created / Updated By</TableHead>
-                    <TableHead className="font-bold text-slate-900">Type / Category</TableHead>
-                    <TableHead className="font-bold text-slate-900">Month / Description</TableHead>
-                    <TableHead className="font-bold text-slate-900">Amount</TableHead>
+                    <TableHead className="font-bold text-slate-900 min-w-[240px]">Total Members & Progress Line</TableHead>
                     <TableHead className="font-bold text-slate-900">Status</TableHead>
                     <TableHead className="font-bold text-slate-900">Updated Date</TableHead>
-                    {staff && <TableHead className="text-right font-bold text-slate-900">Actions</TableHead>}
+                    <TableHead className="text-right font-bold text-slate-900">Assigned Members</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {loadingPaged && (
-                    <TableRow><TableCell colSpan={staff ? 8 : 7} className="text-center py-8 text-slate-500">Loading transactions...</TableCell></TableRow>
+                  {loadingAllTrx && (
+                    <TableRow><TableCell colSpan={6} className="text-center py-8 text-slate-500">Loading created fee records...</TableCell></TableRow>
                   )}
-                  {displayedTransactions.length === 0 && !loadingPaged && (
-                    <TableRow><TableCell colSpan={staff ? 8 : 7} className="text-center py-8 text-slate-500">No transaction records found.</TableCell></TableRow>
+                  {filteredCreatedGroups.length === 0 && !loadingAllTrx && (
+                    <TableRow><TableCell colSpan={6} className="text-center py-8 text-slate-500">No created billing records found.</TableCell></TableRow>
                   )}
-                  {displayedTransactions.map((t) => {
-                    const isPending = t.status === 'pending';
-                    const modifier = getModifierInfo(t);
-                    const displayDate = t.updated_at || t.created_at || t.transaction_date;
+                  {filteredCreatedGroups.map((group) => {
+                    const modifier = getModifierInfo(group);
+                    const isExpanded = !!expandedGroups[group.key];
+                    const displayDate = group.updated_at || group.created_at || group.dueDate;
 
                     return (
-                      <TableRow key={t.id} className="hover:bg-slate-50/70 transition-colors">
-                        <TableCell className="font-mono text-xs font-bold text-slate-900">{t.transaction_no}</TableCell>
-                        <TableCell>
-                          <div className="flex flex-col gap-0.5">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-semibold text-slate-900 text-xs">{modifier.name}</span>
-                              <Badge
-                                variant="outline"
-                                className={`text-[10px] px-1.5 py-0 capitalize ${
-                                  modifier.role?.toLowerCase().includes('super')
-                                    ? 'bg-purple-50 text-purple-800 border-purple-200'
-                                    : 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                }`}
-                              >
-                                {modifier.role?.replace(/_/g, ' ')}
-                              </Badge>
+                      <React.Fragment key={group.key}>
+                        <TableRow className="hover:bg-slate-50/70 transition-colors">
+                          {/* Col 1: Campaign Title and Fee */}
+                          <TableCell>
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-bold text-slate-900 text-xs sm:text-sm">{group.title}</span>
+                                <Badge variant="secondary" className="capitalize text-[10px] font-semibold">
+                                  {group.category === 'monthly_payment'
+                                    ? 'Monthly'
+                                    : group.category === 'one_time'
+                                    ? 'One-Time'
+                                    : group.category}
+                                </Badge>
+                              </div>
+                              <div className="text-[11px] text-slate-500 flex items-center gap-2">
+                                <span className="font-semibold text-emerald-800 font-mono">BDT {group.perMemberAmount.toLocaleString()} / member</span>
+                                {group.dueDate && <span>• Due: {group.dueDate}</span>}
+                              </div>
                             </div>
-                            <span className="text-[10px] text-slate-500">
-                              {modifier.action} entry
-                            </span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="secondary" className="capitalize text-[11px] font-semibold">
-                            {t.payment_category === 'monthly_payment'
-                              ? 'Monthly Subscription'
-                              : t.payment_category === 'one_time'
-                              ? 'One-Time Payment'
-                              : t.type}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-col">
-                            {t.month && (
-                              <span className="font-bold text-slate-800 text-xs flex items-center gap-1">
-                                <CalendarIcon className="h-3 w-3 text-emerald-700 inline" /> {t.month}
+                          </TableCell>
+
+                          {/* Col 2: Created / Updated By (Admin) */}
+                          <TableCell>
+                            <div className="flex flex-col gap-0.5">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-semibold text-slate-900 text-xs">{modifier.name}</span>
+                                <Badge
+                                  variant="outline"
+                                  className={`text-[10px] px-1.5 py-0 capitalize ${
+                                    modifier.role?.toLowerCase().includes('super')
+                                      ? 'bg-purple-50 text-purple-800 border-purple-200'
+                                      : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                  }`}
+                                >
+                                  {modifier.role?.replace(/_/g, ' ')}
+                                </Badge>
+                              </div>
+                              <span className="text-[10px] text-slate-500">
+                                {modifier.action} entry
+                              </span>
+                            </div>
+                          </TableCell>
+
+                          {/* Col 3: Real-Time Member Numbers & Progress Line */}
+                          <TableCell>
+                            <div className="space-y-1 max-w-xs">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="font-bold text-slate-900 flex items-center gap-1">
+                                  <Users className="h-3 w-3 text-slate-500 inline" />
+                                  <span>{group.paidCount} / {group.totalMembersAssigned} Paid</span>
+                                </span>
+                                <span className={`font-bold text-[11px] ${
+                                  group.isFullyPaid ? 'text-emerald-700' : 'text-amber-800'
+                                }`}>
+                                  {group.progressPercent}%
+                                </span>
+                              </div>
+
+                              {/* Visual Progress Line Bar */}
+                              <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden flex border border-slate-200 shadow-inner">
+                                <div
+                                  className={`h-full transition-all duration-500 ${
+                                    group.isFullyPaid
+                                      ? 'bg-gradient-to-r from-emerald-600 to-emerald-500'
+                                      : 'bg-gradient-to-r from-emerald-600 to-teal-500'
+                                  }`}
+                                  style={{ width: `${group.progressPercent}%` }}
+                                />
+                                {!group.isFullyPaid && (
+                                  <div
+                                    className="bg-amber-200 h-full transition-all duration-500"
+                                    style={{ width: `${100 - group.progressPercent}%` }}
+                                  />
+                                )}
+                              </div>
+
+                              <div className="text-[10px] text-slate-500 flex justify-between">
+                                <span>Collected: BDT {group.totalCollectedAmount.toLocaleString()}</span>
+                                <span>Target: BDT {group.totalDemandAmount.toLocaleString()}</span>
+                              </div>
+                            </div>
+                          </TableCell>
+
+                          {/* Col 4: Status: Pending -> Complete when line is full */}
+                          <TableCell>
+                            {group.isFullyPaid ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 shadow-2xs">
+                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                                Complete
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
+                                <Clock className="h-3.5 w-3.5 text-amber-600" />
+                                Pending ({group.pendingCount} Unpaid)
                               </span>
                             )}
-                            <span className="text-xs text-slate-500 max-w-xs truncate">{t.description || '-'}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="font-bold text-slate-900 text-sm">
-                          BDT {Number(t.amount).toLocaleString()}
-                        </TableCell>
-                        <TableCell>
-                          {isPending ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-300 shadow-2xs">
-                              <Clock className="h-3 w-3 text-amber-600" /> Pending Payment
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300">
-                              <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Paid
-                            </span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-xs text-slate-600 font-medium whitespace-nowrap">
-                          {displayDate}
-                        </TableCell>
-                        {staff && (
-                          <TableCell className="text-right space-x-1.5 whitespace-nowrap">
-                            {isPending && (
-                              <Button
-                                size="sm"
-                                onClick={() => handleMarkAsPaid(t.id)}
-                                disabled={isUpdating}
-                                className="h-7 text-xs bg-emerald-700 hover:bg-emerald-800 cursor-pointer text-white shadow-2xs"
-                              >
-                                <Check className="h-3 w-3 mr-1" /> Mark Paid
-                              </Button>
-                            )}
-                            {isSuperAdmin && (
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                onClick={() => {
-                                  if (confirm('Delete this transaction?')) deleteTransaction(t.id);
-                                }}
-                                className="cursor-pointer h-7 text-xs"
-                              >
-                                Delete
-                              </Button>
-                            )}
                           </TableCell>
+
+                          {/* Col 5: Updated Date */}
+                          <TableCell className="text-xs text-slate-600 font-medium whitespace-nowrap">
+                            {displayDate}
+                          </TableCell>
+
+                          {/* Col 6: Expand Members Breakdown */}
+                          <TableCell className="text-right whitespace-nowrap">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => toggleExpandGroup(group.key)}
+                              className="h-8 text-xs cursor-pointer border-slate-200 hover:bg-slate-100"
+                            >
+                              {isExpanded ? 'Hide' : 'View Members'} ({group.totalMembersAssigned})
+                              {isExpanded ? <ChevronUp className="h-3.5 w-3.5 ml-1" /> : <ChevronDown className="h-3.5 w-3.5 ml-1" />}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+
+                        {/* Expandable Members Sub-Table */}
+                        {isExpanded && (
+                          <TableRow className="bg-slate-50/90 hover:bg-slate-50/90">
+                            <TableCell colSpan={6} className="p-4">
+                              <div className="space-y-3 bg-white rounded-xl border border-slate-200 p-4 shadow-2xs">
+                                <div className="flex items-center justify-between">
+                                  <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                                    <Users className="h-4 w-4 text-emerald-700" />
+                                    Assigned Member Payment Statuses for &ldquo;{group.title}&rdquo;
+                                  </h4>
+                                  <span className="text-xs text-slate-500">
+                                    {group.paidCount} of {group.totalMembersAssigned} member payments collected ({group.progressPercent}%)
+                                  </span>
+                                </div>
+
+                                <div className="border border-slate-100 rounded-lg overflow-hidden">
+                                  <Table>
+                                    <TableHeader className="bg-slate-50">
+                                      <TableRow className="text-xs">
+                                        <TableHead>Member Name</TableHead>
+                                        <TableHead>Member ID</TableHead>
+                                        <TableHead>Transaction No</TableHead>
+                                        <TableHead>Amount</TableHead>
+                                        <TableHead>Status</TableHead>
+                                        <TableHead className="text-right">Action</TableHead>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                      {group.transactions.map((trx) => {
+                                        const isPending = trx.status === 'pending';
+
+                                        return (
+                                          <TableRow key={trx.id} className="text-xs">
+                                            <TableCell className="font-bold text-slate-900">{trx.member?.name ?? '-'}</TableCell>
+                                            <TableCell className="font-mono text-emerald-800 font-bold">{trx.member?.member_no ?? 'Unassigned'}</TableCell>
+                                            <TableCell className="font-mono text-slate-500">{trx.transaction_no}</TableCell>
+                                            <TableCell className="font-bold text-slate-900">BDT {Number(trx.amount).toLocaleString()}</TableCell>
+                                            <TableCell>
+                                              {isPending ? (
+                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300">
+                                                  <Clock className="h-3 w-3 text-amber-600" /> Pending
+                                                </span>
+                                              ) : (
+                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300">
+                                                  <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Paid
+                                                </span>
+                                              )}
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                              {isPending ? (
+                                                <Button
+                                                  size="sm"
+                                                  onClick={() => handleMarkAsPaid(trx.id)}
+                                                  disabled={isUpdating}
+                                                  className="h-7 text-xs bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer"
+                                                >
+                                                  <Check className="h-3 w-3 mr-1" /> Mark Paid
+                                                </Button>
+                                              ) : (
+                                                <span className="text-[11px] text-slate-400 font-medium">Cleared</span>
+                                              )}
+                                            </TableCell>
+                                          </TableRow>
+                                        );
+                                      })}
+                                    </TableBody>
+                                  </Table>
+                                </div>
+                              </div>
+                            </TableCell>
+                          </TableRow>
                         )}
-                      </TableRow>
+                      </React.Fragment>
                     );
                   })}
                 </TableBody>
               </Table>
             </CardContent>
           </Card>
-
-          <Pagination
-            meta={pagedData?.meta}
-            page={page}
-            perPage={perPage}
-            onPageChange={setPage}
-            onPerPageChange={setPerPage}
-          />
         </div>
       )}
 
@@ -818,7 +1016,7 @@ export default function TransactionsPage() {
                           )}
                         </div>
 
-                        {/* Progress Bar */}
+                        {/* Progress Bar Line */}
                         <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden flex">
                           <div
                             className="bg-emerald-600 h-full transition-all duration-300"
@@ -930,12 +1128,12 @@ export default function TransactionsPage() {
                             <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
                               <Table>
                                 <TableHeader className="bg-slate-50">
-                                  <TableRow>
-                                    <TableHead className="text-xs">Transaction No</TableHead>
-                                    <TableHead className="text-xs">Month / Description</TableHead>
-                                    <TableHead className="text-xs">Amount</TableHead>
-                                    <TableHead className="text-xs">Status</TableHead>
-                                    <TableHead className="text-xs text-right">Payment Date</TableHead>
+                                  <TableRow className="text-xs">
+                                    <TableHead>Transaction No</TableHead>
+                                    <TableHead>Month / Description</TableHead>
+                                    <TableHead>Amount</TableHead>
+                                    <TableHead>Status</TableHead>
+                                    <TableHead className="text-right">Payment Date</TableHead>
                                   </TableRow>
                                 </TableHeader>
                                 <TableBody>
