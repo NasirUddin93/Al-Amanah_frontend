@@ -51,7 +51,7 @@ export default function FdrsPage() {
                 <TableRow key={f.id}>
                   <TableCell className="font-medium">{f.fdr_no}</TableCell>
                   <TableCell>{f.member?.name}</TableCell>
-                  <TableCell className="font-semibold">${f.amount}</TableCell>
+                  <TableCell className="font-semibold">BDT {Number(f.amount).toLocaleString()}</TableCell>
                   <TableCell>{f.start_date}</TableCell>
                   <TableCell>{f.maturity_date ?? '-'}</TableCell>
                   <TableCell><Badge variant="outline" className="capitalize">{f.status}</Badge></TableCell>
@@ -73,7 +73,7 @@ export default function FdrsPage() {
               </select>
               {errors.member_id && <p className="text-sm text-red-600">{String(errors.member_id.message)}</p>}
             </div>
-            <div><Label>Amount</Label><Input type="number" step="0.01" {...register('amount')} />{errors.amount && <p className="text-sm text-red-600">{String(errors.amount.message)}</p>}</div>
+            <div><Label>Amount (BDT)</Label><Input type="number" step="0.01" placeholder="0.00" {...register('amount')} />{errors.amount && <p className="text-sm text-red-600">{String(errors.amount.message)}</p>}</div>
             <div><Label>Start Date</Label><Input type="date" {...register('start_date')} />{errors.start_date && <p className="text-sm text-red-600">{String(errors.start_date.message)}</p>}</div>
             <div><Label>Maturity Date</Label><Input type="date" {...register('maturity_date')} /></div>
             <Button type="submit" className="w-full mt-4">Save</Button>

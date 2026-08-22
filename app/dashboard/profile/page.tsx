@@ -21,7 +21,7 @@ export default function ProfilePage() {
           <div><span className="text-slate-500">Email:</span> <span className="font-medium text-slate-900">{user?.email}</span></div>
           <div><span className="text-slate-500">ID:</span> <span className="font-medium text-slate-900">{user?.member_profile?.member_no ?? '-'}</span></div>
           <div><span className="text-slate-500">Phone:</span> <span className="font-medium text-slate-900">{user?.member_profile?.phone ?? '-'}</span></div>
-          <div><span className="text-slate-500">Share Amount:</span> <span className="font-medium text-slate-900">${user?.member_profile?.share_amount ?? 0}</span></div>
+          <div><span className="text-slate-500">Share Amount:</span> <span className="font-medium text-slate-900">BDT {Number(user?.member_profile?.share_amount ?? 0).toLocaleString()}</span></div>
           <div><span className="text-slate-500">Address:</span> <span className="font-medium text-slate-900">{user?.member_profile?.address ?? '-'}</span></div>
         </CardContent>
       </Card>
@@ -40,7 +40,7 @@ export default function ProfilePage() {
                 <TableRow key={t.id}>
                   <TableCell className="font-medium">{t.transaction_no}</TableCell>
                   <TableCell><Badge variant="outline" className="capitalize">{t.type}</Badge></TableCell>
-                  <TableCell className="font-semibold">${t.amount}</TableCell>
+                  <TableCell className="font-semibold">BDT {Number(t.amount).toLocaleString()}</TableCell>
                   <TableCell>{t.transaction_date}</TableCell>
                 </TableRow>
               ))}

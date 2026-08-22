@@ -89,12 +89,12 @@ function ReportContent() {
                   <TableCell>{t.member?.name}</TableCell>
                   <TableCell className="capitalize">{t.type}</TableCell>
                   <TableCell>{t.transaction_date}</TableCell>
-                  <TableCell className="text-right font-medium">${t.amount}</TableCell>
+                  <TableCell className="text-right font-medium">BDT {Number(t.amount).toLocaleString()}</TableCell>
                 </TableRow>
               ))}
               <TableRow className="border-t-2 border-slate-800">
                 <TableCell colSpan={5} className="text-right font-bold text-slate-900">Total</TableCell>
-                <TableCell className="text-right font-bold text-slate-900">${total.toFixed(2)}</TableCell>
+                <TableCell className="text-right font-bold text-slate-900">BDT {total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
               </TableRow>
             </TableBody>
           </Table>

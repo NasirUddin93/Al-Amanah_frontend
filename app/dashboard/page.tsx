@@ -127,7 +127,7 @@ function MemberDashboard({ user }: { user: User | null }) {
             <div className="bg-white/10 border border-white/20 rounded-xl p-3.5 backdrop-blur-xs min-w-[200px] text-right md:text-right">
               <div className="text-[11px] font-medium text-emerald-200 uppercase tracking-wider">Share Capital</div>
               <div className="text-2xl font-bold text-white mt-0.5">
-                ${Number(user?.member_profile?.share_amount || 0).toLocaleString()}
+                BDT {Number(user?.member_profile?.share_amount || 0).toLocaleString()}
               </div>
             </div>
           </div>
@@ -146,7 +146,7 @@ function MemberDashboard({ user }: { user: User | null }) {
                   </span>
                 </h3>
                 <p className="text-xs text-amber-800">
-                  Total outstanding payment due: <b className="text-slate-900">${pendingAmount.toLocaleString()}</b>
+                  Total outstanding payment due: <b className="text-slate-900">BDT {pendingAmount.toLocaleString()}</b>
                 </p>
                 <div className="flex flex-wrap gap-1.5 pt-1">
                   {pendingTransactions.map((pt) => (
@@ -155,7 +155,7 @@ function MemberDashboard({ user }: { user: User | null }) {
                       className="text-[11px] font-semibold bg-white border border-amber-300 text-amber-950 px-2 py-0.5 rounded shadow-2xs flex items-center gap-1"
                     >
                       <Clock className="h-3 w-3 text-amber-600 inline" />
-                      {pt.month ? pt.month : pt.description || 'Payment'}: <b>${Number(pt.amount).toLocaleString()}</b>
+                      {pt.month ? pt.month : pt.description || 'Payment'}: <b>BDT {Number(pt.amount).toLocaleString()}</b>
                     </span>
                   ))}
                 </div>
@@ -181,7 +181,7 @@ function MemberDashboard({ user }: { user: User | null }) {
               </CardTitle>
             </CardHeader>
             <CardContent className="p-4 pt-0">
-              <div className="text-2xl font-bold text-slate-900">${totalPaid.toLocaleString()}</div>
+              <div className="text-2xl font-bold text-slate-900">BDT {totalPaid.toLocaleString()}</div>
               <p className="text-[11px] text-slate-500 mt-0.5">Completed contributions</p>
             </CardContent>
           </Card>
@@ -207,7 +207,7 @@ function MemberDashboard({ user }: { user: User | null }) {
               </CardTitle>
             </CardHeader>
             <CardContent className="p-4 pt-0">
-              <div className="text-2xl font-bold text-slate-900">${totalFdr.toLocaleString()}</div>
+              <div className="text-2xl font-bold text-slate-900">BDT {totalFdr.toLocaleString()}</div>
               <p className="text-[11px] text-slate-500 mt-0.5">{fdrs?.data.length ?? 0} active certificate(s)</p>
             </CardContent>
           </Card>
@@ -343,7 +343,7 @@ function MemberDashboard({ user }: { user: User | null }) {
                               <span className="text-xs text-slate-500 max-w-xs truncate">{t.description || '-'}</span>
                             </div>
                           </TableCell>
-                          <TableCell className="font-bold text-slate-900 text-sm">${Number(t.amount).toLocaleString()}</TableCell>
+                          <TableCell className="font-bold text-slate-900 text-sm">BDT {Number(t.amount).toLocaleString()}</TableCell>
                           <TableCell>
                             {isPending ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-300 shadow-2xs">
@@ -401,7 +401,7 @@ function MemberDashboard({ user }: { user: User | null }) {
                             {r.payment_method?.replace(/_/g, ' ')}
                           </Badge>
                         </TableCell>
-                        <TableCell className="font-bold text-slate-900 text-sm">${Number(r.amount).toLocaleString()}</TableCell>
+                        <TableCell className="font-bold text-slate-900 text-sm">BDT {Number(r.amount).toLocaleString()}</TableCell>
                         <TableCell className="text-right">
                           <Button
                             variant="outline"
@@ -449,7 +449,7 @@ function MemberDashboard({ user }: { user: User | null }) {
                       <TableRow key={f.id} className="hover:bg-slate-50/70 transition-colors">
                         <TableCell className="font-mono text-xs font-bold text-slate-900">{f.fdr_no}</TableCell>
                         <TableCell className="text-xs text-slate-600">{f.start_date}</TableCell>
-                        <TableCell className="font-bold text-slate-900 text-sm">${Number(f.amount).toLocaleString()}</TableCell>
+                        <TableCell className="font-bold text-slate-900 text-sm">BDT {Number(f.amount).toLocaleString()}</TableCell>
                         <TableCell className="text-xs text-slate-600">{f.maturity_date || '-'}</TableCell>
                         <TableCell className="text-right">
                           <Badge variant={f.status === 'active' ? 'default' : 'secondary'} className="capitalize">
@@ -560,7 +560,7 @@ function MemberDashboard({ user }: { user: User | null }) {
                   <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
                     <span className="text-xs text-slate-500 block font-medium">Share Contribution</span>
                     <span className="font-bold text-slate-900 block mt-0.5">
-                      ${Number(user?.member_profile?.share_amount || 0).toLocaleString()}
+                      BDT {Number(user?.member_profile?.share_amount || 0).toLocaleString()}
                     </span>
                   </div>
 
@@ -640,7 +640,7 @@ function AdminDashboard({ user }: { user: User | null }) {
           <CardHeader className="pb-2">
             <CardTitle className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Ledger Total</CardTitle>
           </CardHeader>
-          <CardContent className="text-2xl font-bold text-emerald-700">${trx?.summary?.page_total ?? 0}</CardContent>
+          <CardContent className="text-2xl font-bold text-emerald-700">BDT {trx?.summary?.page_total ?? 0}</CardContent>
         </Card>
 
         {isSuperAdmin ? (

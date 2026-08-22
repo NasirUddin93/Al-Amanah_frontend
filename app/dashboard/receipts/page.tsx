@@ -73,7 +73,7 @@ export default function ReceiptsPage() {
                   <TableRow key={r.id}>
                     <TableCell className="font-medium">{r.receipt_no}</TableCell>
                     <TableCell>{r.member?.name}</TableCell>
-                    <TableCell className="font-semibold">${r.amount}</TableCell>
+                    <TableCell className="font-semibold">BDT {Number(r.amount).toLocaleString()}</TableCell>
                     <TableCell><Badge variant="secondary" className="capitalize">{r.payment_method?.replace('_', ' ')}</Badge></TableCell>
                     <TableCell>{r.receipt_date}</TableCell>
                     <TableCell className="text-right">
@@ -95,7 +95,7 @@ export default function ReceiptsPage() {
             <DialogHeader><DialogTitle>New Receipt</DialogTitle></DialogHeader>
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
               <div><Label>Transaction ID</Label><Input type="number" {...register('transaction_id')} className="mt-1" />{errors.transaction_id && <p className="text-sm text-red-600">{String(errors.transaction_id.message)}</p>}</div>
-              <div><Label>Amount</Label><Input type="number" step="0.01" {...register('amount')} className="mt-1" />{errors.amount && <p className="text-sm text-red-600">{String(errors.amount.message)}</p>}</div>
+              <div><Label>Amount (BDT)</Label><Input type="number" step="0.01" placeholder="0.00" {...register('amount')} className="mt-1" />{errors.amount && <p className="text-sm text-red-600">{String(errors.amount.message)}</p>}</div>
               <div><Label>Payment Method</Label>
                 <select className="w-full border border-slate-200 rounded-md p-2 text-sm bg-white mt-1" {...register('payment_method')}>
                   {['cash', 'bank', 'mobile_banking', 'other'].map((m) => <option key={m} value={m} className="capitalize">{m.replace('_', ' ')}</option>)}

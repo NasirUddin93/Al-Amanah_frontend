@@ -50,7 +50,7 @@ function Content() {
                 <TableRow key={e.id}>
                   <TableCell className="font-medium">{e.title}</TableCell>
                   <TableCell>{e.expense_date}</TableCell>
-                  <TableCell className="font-semibold">${e.amount}</TableCell>
+                  <TableCell className="font-semibold">BDT {Number(e.amount).toLocaleString()}</TableCell>
                   <TableCell className="text-slate-500">{e.description || '-'}</TableCell>
                   <TableCell className="text-right">
                     <Button size="sm" variant="destructive" onClick={() => { if (confirm('Delete this expense?')) remove(e.id); }}>
@@ -70,7 +70,7 @@ function Content() {
           <form className="space-y-3" onSubmit={handleSubmit(async (v) => { await create({ ...v, amount: Number(v.amount) }).unwrap(); setOpen(false); reset(); })}>
             <div><Label>Title</Label><Input {...register('title')} />{errors.title && <p className="text-sm text-red-600">{String(errors.title.message)}</p>}</div>
             <div><Label>Date</Label><Input type="date" {...register('expense_date')} />{errors.expense_date && <p className="text-sm text-red-600">{String(errors.expense_date.message)}</p>}</div>
-            <div><Label>Amount</Label><Input type="number" step="0.01" {...register('amount')} />{errors.amount && <p className="text-sm text-red-600">{String(errors.amount.message)}</p>}</div>
+            <div><Label>Amount (BDT)</Label><Input type="number" step="0.01" placeholder="0.00" {...register('amount')} />{errors.amount && <p className="text-sm text-red-600">{String(errors.amount.message)}</p>}</div>
             <div><Label>Description</Label><Input {...register('description')} /></div>
             <Button type="submit" className="w-full mt-4">Save</Button>
           </form>

@@ -17,7 +17,7 @@ export function ReceiptPrintArea({ receipt }: { receipt: Receipt | null }) {
         <p><span className="font-semibold">Member:</span> {receipt.member?.name} ({receipt.member?.member_no ?? '-'})</p>
         <p><span className="font-semibold">Transaction:</span> {receipt.transaction?.transaction_no ?? '-'}</p>
         <p><span className="font-semibold">Payment Method:</span> <span className="capitalize">{receipt.payment_method?.replace('_', ' ')}</span></p>
-        <p className="text-xl mt-6 font-bold text-slate-900">Amount: ${receipt.amount}</p>
+        <p className="text-xl mt-6 font-bold text-slate-900">Amount: BDT {Number(receipt.amount).toLocaleString()}</p>
       </div>
 
       <div className="mt-24 flex justify-between text-sm text-slate-700">

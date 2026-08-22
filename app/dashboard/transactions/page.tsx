@@ -65,7 +65,7 @@ export default function TransactionsPage() {
   const [selectedMonths, setSelectedMonths] = useState<string[]>([
     `${MONTH_NAMES[new Date().getMonth()]} ${new Date().getFullYear()}`
   ]);
-  const [demandAmount, setDemandAmount] = useState<string>('50');
+  const [demandAmount, setDemandAmount] = useState<string>('2000');
   const [oneTimeTitle, setOneTimeTitle] = useState<string>('Annual General Meeting Fee');
   const [demandDueDate, setDemandDueDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [demandDescription, setDemandDescription] = useState<string>('');
@@ -162,7 +162,7 @@ export default function TransactionsPage() {
               onClick={() => {
                 // Auto-set default monthly amount from settings if available
                 const settingsList = Array.isArray(settings) ? settings : (settings as any)?.data || [];
-                const defaultFee = settingsList.find((s: any) => s.setting_key === 'payment_amount_1')?.setting_value || '50';
+                const defaultFee = settingsList.find((s: any) => s.setting_key === 'payment_amount_1')?.setting_value || '2000';
                 setDemandAmount(defaultFee);
                 setOpenDemand(true);
               }}
@@ -254,7 +254,7 @@ export default function TransactionsPage() {
                       </div>
                     </TableCell>
                     <TableCell className="font-bold text-slate-900 text-sm">
-                      ${Number(t.amount).toLocaleString()}
+                      BDT {Number(t.amount).toLocaleString()}
                     </TableCell>
                     <TableCell>
                       {isPending ? (
@@ -446,7 +446,7 @@ export default function TransactionsPage() {
                 </div>
 
                 <p className="text-[11px] text-emerald-800">
-                  A separate pending payment transaction of <b>${demandAmount}</b> will be generated for each selected month per member.
+                  A separate pending payment transaction of <b>BDT {demandAmount}</b> will be generated for each selected month per member.
                 </p>
               </div>
             )}
@@ -469,13 +469,13 @@ export default function TransactionsPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <Label className="font-bold text-slate-900 text-xs">
-                  {demandCategory === 'monthly_payment' ? 'Amount per Month ($)' : 'Total Amount ($)'}
+                  {demandCategory === 'monthly_payment' ? 'Amount per Month (BDT)' : 'Total Amount (BDT)'}
                 </Label>
                 <Input
                   type="number"
                   step="0.01"
                   min="0.01"
-                  placeholder="50"
+                  placeholder="2000"
                   value={demandAmount}
                   onChange={(e) => setDemandAmount(e.target.value)}
                   className="bg-white mt-1 text-sm font-bold"
@@ -556,7 +556,7 @@ export default function TransactionsPage() {
             </div>
 
             <div>
-              <Label>Amount ($)</Label>
+              <Label>Amount (BDT)</Label>
               <Input type="number" step="0.01" placeholder="0.00" {...register('amount')} className="bg-white mt-1" />
               {errors.amount && <p className="text-xs text-red-600 mt-1">{String(errors.amount.message)}</p>}
             </div>
