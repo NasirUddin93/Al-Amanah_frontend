@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useAppSelector } from '@/store/hooks';
@@ -9,6 +9,7 @@ import {
   useCreateTransactionMutation,
   useUpdateTransactionMutation,
   useCollectPaymentMutation,
+  useUploadReceiptPhotoMutation,
   useDeleteTransactionMutation,
   useGeneratePaymentsMutation,
   useGetUsersQuery,
@@ -45,6 +46,13 @@ import {
   TrendingUp,
   Receipt as ReceiptIcon,
   Calculator,
+  Camera,
+  Image as ImageIcon,
+  Upload,
+  Eye,
+  ZoomIn,
+  FileImage,
+  ExternalLink,
 } from 'lucide-react';
 
 const MONTH_NAMES = [
@@ -78,6 +86,7 @@ export default function TransactionsPage() {
   const [createTransaction, { isLoading: isCreatingSingle }] = useCreateTransactionMutation();
   const [updateTransaction, { isLoading: isUpdating }] = useUpdateTransactionMutation();
   const [collectPayment, { isLoading: isCollecting }] = useCollectPaymentMutation();
+  const [uploadReceiptPhoto, { isLoading: isUploadingPhoto }] = useUploadReceiptPhotoMutation();
   const [deleteTransaction] = useDeleteTransactionMutation();
   const [generatePayments, { isLoading: isGenerating }] = useGeneratePaymentsMutation();
   const { data: usersData, isLoading: loadingUsers } = useGetUsersQuery(
@@ -98,6 +107,17 @@ export default function TransactionsPage() {
   const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [paymentNotes, setPaymentNotes] = useState<string>('');
   const [createReceipt, setCreateReceipt] = useState<boolean>(true);
+  const [collectionReceiptPhoto, setCollectionReceiptPhoto] = useState<string | null>(null);
+
+  // Lightbox Receipt Photo Modal
+  const [openPhotoModal, setOpenPhotoModal] = useState(false);
+  const [photoModalUrl, setPhotoModalUrl] = useState<string>('');
+  const [photoModalTitle, setPhotoModalTitle] = useState<string>('');
+  const [photoModalDate, setPhotoModalDate] = useState<string>('');
+
+  // Hidden File Input Trigger
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [targetUploadTrxId, setTargetUploadTrxId] = useState<number | null>(null);
 
   // Demand Generator Form State
   const [demandCategory, setDemandCategory] = useState<'monthly_payment' | 'one_time'>('monthly_payment');
@@ -200,7 +220,50 @@ export default function TransactionsPage() {
     setPaymentDate(new Date().toISOString().split('T')[0]);
     setPaymentNotes('');
     setCreateReceipt(true);
+    setCollectionReceiptPhoto(trx.receipt_photo || null);
     setOpenCollect(true);
+  };
+
+  // Open Lightbox Photo Viewer
+  const viewReceiptPhoto = (url: string, title: string, date?: string) => {
+    setPhotoModalUrl(url);
+    setPhotoModalTitle(title);
+    setPhotoModalDate(date || '');
+    setOpenPhotoModal(true);
+  };
+
+  // Trigger File Upload for a Transaction
+  const triggerPhotoUpload = (trxId: number) => {
+    setTargetUploadTrxId(trxId);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+      fileInputRef.current.click();
+    }
+  };
+
+  const onFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !targetUploadTrxId) return;
+
+    if (file.size > 10 * 1024 * 1024) {
+      alert('File size must be under 10MB.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const base64 = reader.result as string;
+        await uploadReceiptPhoto({
+          id: targetUploadTrxId,
+          body: { photo_data: base64 },
+        }).unwrap();
+        alert('Receipt slip photo uploaded successfully!');
+      } catch (err: any) {
+        alert(err?.data?.message || 'Failed to upload receipt photo.');
+      }
+    };
+    reader.readAsDataURL(file);
   };
 
   // Confirm Collection of Partial or Full Payment
@@ -232,15 +295,6 @@ export default function TransactionsPage() {
     } catch (err: any) {
       alert(err?.data?.message || 'Failed to process payment.');
     }
-  };
-
-  const handleAssignToSpecificMember = (memberId: number) => {
-    setSelectedMemberId(String(memberId));
-    setTargetAllMembers(false);
-    const settingsList = Array.isArray(settings) ? settings : (settings as any)?.data || [];
-    const defaultFee = settingsList.find((s: any) => s.setting_key === 'payment_amount_1')?.setting_value || '2000';
-    setDemandAmount(defaultFee);
-    setOpenDemand(true);
   };
 
   const toggleExpandGroup = (groupKey: string) => {
@@ -358,11 +412,9 @@ export default function TransactionsPage() {
     });
 
     const groupList = Object.values(groups).map((g) => {
-      // Find distinct assigned members count
       const memberIds = new Set(g.transactions.map((t) => t.member?.id).filter(Boolean));
       const totalMembersAssigned = memberIds.size || g.transactions.length;
 
-      // Calculate total demand vs collected amount
       const totalDemandAmount = g.transactions.reduce((sum, t) => sum + Number(t.amount || 0), 0);
       const totalCollectedAmount = g.transactions
         .filter((t) => t.status === 'paid')
@@ -500,14 +552,23 @@ export default function TransactionsPage() {
 
   return (
     <div className="space-y-5">
+      {/* Hidden File Input for Receipt Slip Uploads */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={onFileSelected}
+        accept="image/*,.pdf"
+        className="hidden"
+      />
+
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Transactions & Billing</h1>
           <p className="text-sm text-slate-500 mt-0.5">
             {activeTab === 'created'
-              ? 'Create monthly subscriptions & one-time dues, and track campaign collection progress lines.'
-              : 'Monitor member payment statuses, total paid contributions, and collect pending dues with live settlement.'}
+              ? 'Create monthly subscriptions & one-time dues, track campaign collection progress lines, and view member receipt slips.'
+              : 'Monitor member payment statuses, view uploaded receipt photos, and collect pending dues with live settlement.'}
           </p>
         </div>
         {staff && activeTab === 'created' && (
@@ -797,7 +858,7 @@ export default function TransactionsPage() {
                               onClick={() => toggleExpandGroup(group.key)}
                               className="h-8 text-xs cursor-pointer border-slate-200 hover:bg-slate-100"
                             >
-                              {isExpanded ? 'Hide' : 'View Members'} ({group.totalMembersAssigned})
+                              {isExpanded ? 'Hide' : 'View Details'} ({group.totalMembersAssigned})
                               {isExpanded ? <ChevronUp className="h-3.5 w-3.5 ml-1" /> : <ChevronDown className="h-3.5 w-3.5 ml-1" />}
                             </Button>
                           </TableCell>
@@ -808,13 +869,13 @@ export default function TransactionsPage() {
                           <TableRow className="bg-slate-50/90 hover:bg-slate-50/90">
                             <TableCell colSpan={6} className="p-4">
                               <div className="space-y-3 bg-white rounded-xl border border-slate-200 p-4 shadow-2xs">
-                                <div className="flex items-center justify-between">
+                                <div className="flex items-center justify-between flex-wrap gap-2">
                                   <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
                                     <Users className="h-4 w-4 text-emerald-700" />
-                                    Assigned Member Payment Statuses for &ldquo;{group.title}&rdquo;
+                                    Assigned Member Details & Receipt Slips for &ldquo;{group.title}&rdquo;
                                   </h4>
                                   <span className="text-xs text-slate-500">
-                                    {group.paidCount} of {group.totalMembersAssigned} members cleared ({group.progressPercent}% of amount collected)
+                                    {group.paidCount} of {group.totalMembersAssigned} members cleared ({group.progressPercent}% collected)
                                   </span>
                                 </div>
 
@@ -826,6 +887,7 @@ export default function TransactionsPage() {
                                         <TableHead>Member ID</TableHead>
                                         <TableHead>Transaction No</TableHead>
                                         <TableHead>Amount</TableHead>
+                                        <TableHead>Receipt Photo / Proof</TableHead>
                                         <TableHead>Status</TableHead>
                                         <TableHead className="text-right">Action</TableHead>
                                       </TableRow>
@@ -840,6 +902,51 @@ export default function TransactionsPage() {
                                             <TableCell className="font-mono text-emerald-800 font-bold">{trx.member?.member_no ?? 'Unassigned'}</TableCell>
                                             <TableCell className="font-mono text-slate-500">{trx.transaction_no}</TableCell>
                                             <TableCell className="font-bold text-slate-900">BDT {Number(trx.amount).toLocaleString()}</TableCell>
+                                            
+                                            {/* Receipt Photo Column in Details */}
+                                            <TableCell>
+                                              {trx.receipt_photo ? (
+                                                <div className="flex items-center gap-2">
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => viewReceiptPhoto(trx.receipt_photo!, `${trx.member?.name || 'Member'} - ${trx.month || trx.description || 'Receipt'}`, trx.receipt_photo_uploaded_at)}
+                                                    className="group relative w-10 h-10 rounded-lg border border-emerald-300 overflow-hidden bg-slate-100 flex items-center justify-center cursor-pointer shadow-2xs hover:border-emerald-600 transition-all"
+                                                  >
+                                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                    <img
+                                                      src={trx.receipt_photo}
+                                                      alt="Receipt Proof"
+                                                      className="w-full h-full object-cover group-hover:scale-110 transition-all duration-200"
+                                                    />
+                                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                                      <ZoomIn className="h-4 w-4 text-white" />
+                                                    </div>
+                                                  </button>
+                                                  <div className="flex flex-col">
+                                                    <span className="text-[10px] font-bold text-emerald-800 flex items-center gap-1">
+                                                      <FileImage className="h-3 w-3 text-emerald-700" /> Slip Attached
+                                                    </span>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => triggerPhotoUpload(trx.id)}
+                                                      className="text-[10px] text-slate-500 hover:text-slate-800 underline cursor-pointer text-left"
+                                                    >
+                                                      Re-upload
+                                                    </button>
+                                                  </div>
+                                                </div>
+                                              ) : (
+                                                <Button
+                                                  size="sm"
+                                                  variant="outline"
+                                                  onClick={() => triggerPhotoUpload(trx.id)}
+                                                  className="h-7 text-[11px] text-slate-600 border-dashed border-slate-300 hover:border-emerald-500 hover:text-emerald-800 cursor-pointer"
+                                                >
+                                                  <Camera className="h-3 w-3 mr-1 text-slate-400" /> Attach Slip
+                                                </Button>
+                                              )}
+                                            </TableCell>
+
                                             <TableCell>
                                               {isPending ? (
                                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300">
@@ -851,6 +958,7 @@ export default function TransactionsPage() {
                                                 </span>
                                               )}
                                             </TableCell>
+                                            
                                             <TableCell className="text-right">
                                               {isPending ? (
                                                 <Button
@@ -1104,7 +1212,7 @@ export default function TransactionsPage() {
                             </>
                           ) : (
                             <>
-                              View Dues & History ({item.transactions.length}) <ChevronDown className="h-3.5 w-3.5 ml-1" />
+                              View Details & Slips ({item.transactions.length}) <ChevronDown className="h-3.5 w-3.5 ml-1" />
                             </>
                           )}
                         </Button>
@@ -1122,7 +1230,7 @@ export default function TransactionsPage() {
                               Unpaid / Pending Payment Dues ({pendingTransactions.length})
                             </h4>
 
-                            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+                            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                               {pendingTransactions.map((pt) => (
                                 <div
                                   key={pt.id}
@@ -1141,11 +1249,27 @@ export default function TransactionsPage() {
                                       <span>Due Date: {pt.transaction_date}</span>
                                       <span className="font-mono text-[10px] text-slate-400">{pt.transaction_no}</span>
                                     </div>
-                                    {pt.description && pt.description.includes('Remaining due') && (
-                                      <p className="text-[10px] text-amber-700 mt-1 font-medium bg-amber-50 p-1 rounded">
-                                        {pt.description}
-                                      </p>
-                                    )}
+
+                                    {/* Uploaded Receipt Photo in Pending Card */}
+                                    <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between">
+                                      {pt.receipt_photo ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => viewReceiptPhoto(pt.receipt_photo!, `${member.name} - ${pt.month || pt.description || 'Receipt Slip'}`, pt.receipt_photo_uploaded_at)}
+                                          className="flex items-center gap-1.5 text-xs text-emerald-800 font-bold hover:underline cursor-pointer bg-emerald-50 px-2 py-1 rounded"
+                                        >
+                                          <ImageIcon className="h-3.5 w-3.5 text-emerald-600" /> View Attached Slip
+                                        </button>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={() => triggerPhotoUpload(pt.id)}
+                                          className="flex items-center gap-1 text-[11px] text-slate-500 hover:text-emerald-700 cursor-pointer"
+                                        >
+                                          <Camera className="h-3 w-3" /> Upload Slip Photo
+                                        </button>
+                                      )}
+                                    </div>
                                   </div>
 
                                   {staff && (
@@ -1167,7 +1291,7 @@ export default function TransactionsPage() {
                         <div className="space-y-2">
                           <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
                             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                            Completed / Paid Records ({paidTransactions.length})
+                            Completed / Paid Records & Receipt Photos ({paidTransactions.length})
                           </h4>
 
                           {paidTransactions.length === 0 ? (
@@ -1180,6 +1304,7 @@ export default function TransactionsPage() {
                                     <TableHead>Transaction No</TableHead>
                                     <TableHead>Month / Description</TableHead>
                                     <TableHead>Amount</TableHead>
+                                    <TableHead>Receipt Photo / Slip</TableHead>
                                     <TableHead>Status</TableHead>
                                     <TableHead className="text-right">Payment Date</TableHead>
                                   </TableRow>
@@ -1190,6 +1315,28 @@ export default function TransactionsPage() {
                                       <TableCell className="font-mono font-medium">{paid.transaction_no}</TableCell>
                                       <TableCell>{paid.month || paid.description || paid.type}</TableCell>
                                       <TableCell className="font-bold text-slate-900">BDT {Number(paid.amount).toLocaleString()}</TableCell>
+                                      
+                                      {/* Receipt Photo in History */}
+                                      <TableCell>
+                                        {paid.receipt_photo ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => viewReceiptPhoto(paid.receipt_photo!, `${member.name} - ${paid.month || paid.description || 'Receipt Slip'}`, paid.receipt_photo_uploaded_at)}
+                                            className="flex items-center gap-1.5 text-xs text-emerald-800 font-bold hover:underline cursor-pointer bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200"
+                                          >
+                                            <ImageIcon className="h-3.5 w-3.5 text-emerald-600" /> View Slip
+                                          </button>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            onClick={() => triggerPhotoUpload(paid.id)}
+                                            className="text-[11px] text-slate-400 hover:text-slate-700 flex items-center gap-1 cursor-pointer"
+                                          >
+                                            <Camera className="h-3 w-3" /> Attach Slip
+                                          </button>
+                                        )}
+                                      </TableCell>
+
                                       <TableCell>
                                         <Badge className="bg-emerald-50 text-emerald-800 border-emerald-300 text-[10px]">
                                           Paid
@@ -1212,6 +1359,49 @@ export default function TransactionsPage() {
           </div>
         </div>
       )}
+
+      {/* =========================================================================
+          DIALOG: LIGHTBOX RECEIPT PHOTO VIEWER
+          ========================================================================= */}
+      <Dialog open={openPhotoModal} onOpenChange={setOpenPhotoModal}>
+        <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-slate-900 text-base">
+              <FileImage className="h-5 w-5 text-emerald-700" />
+              <span>{photoModalTitle || 'Member Payment Receipt Photo'}</span>
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3 pt-1">
+            <div className="relative w-full min-h-[300px] max-h-[550px] bg-slate-900 rounded-xl overflow-hidden flex items-center justify-center shadow-inner border border-slate-200">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={photoModalUrl}
+                alt="Receipt Slip Proof"
+                className="max-h-[520px] w-auto max-w-full object-contain"
+              />
+            </div>
+
+            <div className="flex items-center justify-between text-xs text-slate-500 px-1">
+              {photoModalDate && <span>Uploaded at: {photoModalDate}</span>}
+              <a
+                href={photoModalUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-emerald-700 font-bold hover:underline flex items-center gap-1 ml-auto"
+              >
+                <ExternalLink className="h-3.5 w-3.5" /> Open Full Image in New Tab
+              </a>
+            </div>
+
+            <DialogFooter className="pt-2">
+              <Button type="button" onClick={() => setOpenPhotoModal(false)} className="cursor-pointer bg-slate-900 text-white">
+                Close Viewer
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* =========================================================================
           DIALOG: COLLECT PAYMENT (PARTIAL OR FULL WITH REMAINING DUE CALCULATION)
@@ -1253,6 +1443,34 @@ export default function TransactionsPage() {
                   <span className="font-mono text-slate-400">{collectingTrx.transaction_no}</span>
                 </div>
               </div>
+
+              {/* Attached Slip Preview (if already uploaded by member) */}
+              {collectingTrx.receipt_photo && (
+                <div className="p-2.5 bg-emerald-50 border border-emerald-300 rounded-lg flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={collectingTrx.receipt_photo}
+                      alt="Slip"
+                      className="w-9 h-9 rounded object-cover border border-emerald-300"
+                    />
+                    <div>
+                      <span className="font-bold text-emerald-900 block">Member Slip Attached</span>
+                      <span className="text-[10px] text-emerald-700">Proof photo provided by member</span>
+                    </div>
+                  </div>
+
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => viewReceiptPhoto(collectingTrx.receipt_photo!, `${collectingTrx.member?.name} - Proof Slip`, collectingTrx.receipt_photo_uploaded_at)}
+                    className="h-7 text-xs border-emerald-300 text-emerald-800 cursor-pointer"
+                  >
+                    <Eye className="h-3 w-3 mr-1" /> View Photo
+                  </Button>
+                </div>
+              )}
 
               {/* Paid Amount Input Field */}
               <div className="space-y-1.5">

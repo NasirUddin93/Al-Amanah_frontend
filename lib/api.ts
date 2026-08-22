@@ -152,6 +152,14 @@ export const api = createApi({
       query: ({ id, body }) => ({ url: `/transactions/${id}/collect-payment`, method: 'POST', body }),
       invalidatesTags: ['Transactions', 'Receipts', 'Notifications'],
     }),
+    uploadReceiptPhoto: builder.mutation<{ message: string; transaction: T.Transaction }, { id: number; body: any }>({
+      query: ({ id, body }) => ({
+        url: `/transactions/${id}/upload-receipt-photo`,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Transactions', 'Receipts'],
+    }),
     getReport: builder.query<T.TransactionList, { from?: string; to?: string; type?: string; page?: number; per_page?: number } | void>({
       query: (params) => ({ url: '/reports/transactions', params: params || undefined }),
     }),
@@ -259,6 +267,7 @@ export const {
   useAssignRoleMutation, useGetRolesQuery, useGetPermissionsQuery, useCreateRoleMutation, useUpdateRoleMutation, useDeleteRoleMutation,
   useGetTransactionsQuery, useCreateTransactionMutation, useUpdateTransactionMutation,
   useCollectPaymentMutation,
+  useUploadReceiptPhotoMutation,
   useDeleteTransactionMutation, useGeneratePaymentsMutation, useGetReportQuery,
   useGetReceiptsQuery, useCreateReceiptMutation, useUpdateReceiptMutation, useDeleteReceiptMutation,
   useGetMeetingExpensesQuery, useCreateMeetingExpenseMutation, useDeleteMeetingExpenseMutation,

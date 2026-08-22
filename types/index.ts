@@ -47,6 +47,8 @@ export interface Transaction {
   updated_by?: AdminModifier | string;
   last_modified_by?: AdminModifier;
   receipt?: Receipt;
+  receipt_photo?: string;
+  receipt_photo_uploaded_at?: string;
   created_at: string;
   updated_at?: string;
 }
