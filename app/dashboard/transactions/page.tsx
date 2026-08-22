@@ -8,6 +8,7 @@ import {
   useGetTransactionsQuery,
   useCreateTransactionMutation,
   useUpdateTransactionMutation,
+  useCollectPaymentMutation,
   useDeleteTransactionMutation,
   useGeneratePaymentsMutation,
   useGetUsersQuery,
@@ -42,6 +43,8 @@ import {
   Layers,
   ArrowRight,
   TrendingUp,
+  Receipt as ReceiptIcon,
+  Calculator,
 } from 'lucide-react';
 
 const MONTH_NAMES = [
@@ -74,6 +77,7 @@ export default function TransactionsPage() {
 
   const [createTransaction, { isLoading: isCreatingSingle }] = useCreateTransactionMutation();
   const [updateTransaction, { isLoading: isUpdating }] = useUpdateTransactionMutation();
+  const [collectPayment, { isLoading: isCollecting }] = useCollectPaymentMutation();
   const [deleteTransaction] = useDeleteTransactionMutation();
   const [generatePayments, { isLoading: isGenerating }] = useGeneratePaymentsMutation();
   const { data: usersData, isLoading: loadingUsers } = useGetUsersQuery(
@@ -85,6 +89,15 @@ export default function TransactionsPage() {
   // Modals
   const [openSingle, setOpenSingle] = useState(false);
   const [openDemand, setOpenDemand] = useState(false);
+
+  // Partial / Full Collection Modal State
+  const [openCollect, setOpenCollect] = useState(false);
+  const [collectingTrx, setCollectingTrx] = useState<Transaction | null>(null);
+  const [paidAmountInput, setPaidAmountInput] = useState<string>('');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'bank' | 'mobile_banking' | 'other'>('cash');
+  const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [paymentNotes, setPaymentNotes] = useState<string>('');
+  const [createReceipt, setCreateReceipt] = useState<boolean>(true);
 
   // Demand Generator Form State
   const [demandCategory, setDemandCategory] = useState<'monthly_payment' | 'one_time'>('monthly_payment');
@@ -180,15 +193,44 @@ export default function TransactionsPage() {
     }
   };
 
-  const handleMarkAsPaid = async (trxId: number) => {
-    if (!confirm('Mark this transaction as PAID and collected?')) return;
+  // Open Collect Payment Modal (Partial or Full)
+  const openCollectPaymentModal = (trx: Transaction) => {
+    setCollectingTrx(trx);
+    setPaidAmountInput(String(trx.amount));
+    setPaymentDate(new Date().toISOString().split('T')[0]);
+    setPaymentNotes('');
+    setCreateReceipt(true);
+    setOpenCollect(true);
+  };
+
+  // Confirm Collection of Partial or Full Payment
+  const onConfirmCollection = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!collectingTrx) return;
+
+    const inputNum = Number(paidAmountInput);
+    if (isNaN(inputNum) || inputNum <= 0) {
+      alert('Please enter a valid payment amount greater than 0.');
+      return;
+    }
+
     try {
-      await updateTransaction({
-        id: trxId,
-        body: { status: 'paid' },
+      const res = await collectPayment({
+        id: collectingTrx.id,
+        body: {
+          paid_amount: inputNum,
+          payment_method: paymentMethod,
+          payment_date: paymentDate,
+          notes: paymentNotes || undefined,
+          create_receipt: createReceipt,
+        },
       }).unwrap();
+
+      alert(res.message);
+      setOpenCollect(false);
+      setCollectingTrx(null);
     } catch (err: any) {
-      alert(err?.data?.message || 'Failed to update transaction status.');
+      alert(err?.data?.message || 'Failed to process payment.');
     }
   };
 
@@ -273,13 +315,13 @@ export default function TransactionsPage() {
     allTransactions.forEach((t) => {
       let groupKey = '';
       if (t.payment_category === 'monthly_payment' && t.month) {
-        groupKey = `monthly_${t.month}_${t.amount}`;
+        groupKey = `monthly_${t.month}`;
       } else if (t.payment_category === 'one_time') {
-        groupKey = `onetime_${t.description || t.type}_${t.amount}_${t.transaction_date}`;
+        groupKey = `onetime_${t.description || t.type}_${t.transaction_date}`;
       } else if (t.month) {
-        groupKey = `monthly_${t.month}_${t.amount}`;
+        groupKey = `monthly_${t.month}`;
       } else {
-        groupKey = `record_${t.type}_${t.description || ''}_${t.transaction_date}_${t.amount}_${(t.created_at || '').slice(0, 10)}`;
+        groupKey = `record_${t.type}_${t.description || ''}_${t.transaction_date}_${(t.created_at || '').slice(0, 10)}`;
       }
 
       if (!groups[groupKey]) {
@@ -316,23 +358,30 @@ export default function TransactionsPage() {
     });
 
     const groupList = Object.values(groups).map((g) => {
-      const totalMembersAssigned = g.transactions.length;
-      const paidCount = g.transactions.filter((t) => t.status === 'paid').length;
-      const pendingCount = g.transactions.filter((t) => t.status === 'pending').length;
+      // Find distinct assigned members count
+      const memberIds = new Set(g.transactions.map((t) => t.member?.id).filter(Boolean));
+      const totalMembersAssigned = memberIds.size || g.transactions.length;
+
+      // Calculate total demand vs collected amount
       const totalDemandAmount = g.transactions.reduce((sum, t) => sum + Number(t.amount || 0), 0);
       const totalCollectedAmount = g.transactions
         .filter((t) => t.status === 'paid')
         .reduce((sum, t) => sum + Number(t.amount || 0), 0);
-      const progressPercent = totalMembersAssigned > 0
-        ? Math.round((paidCount / totalMembersAssigned) * 100)
+
+      const pendingTrx = g.transactions.filter((t) => t.status === 'pending');
+      const pendingMembersCount = new Set(pendingTrx.map((t) => t.member?.id).filter(Boolean)).size;
+      const paidMembersCount = totalMembersAssigned - pendingMembersCount;
+
+      const progressPercent = totalDemandAmount > 0
+        ? Math.min(100, Math.round((totalCollectedAmount / totalDemandAmount) * 100))
         : 100;
-      const isFullyPaid = paidCount === totalMembersAssigned && totalMembersAssigned > 0;
+      const isFullyPaid = pendingMembersCount === 0 && totalMembersAssigned > 0;
 
       return {
         ...g,
         totalMembersAssigned,
-        paidCount,
-        pendingCount,
+        paidCount: paidMembersCount,
+        pendingCount: pendingMembersCount,
         totalDemandAmount,
         totalCollectedAmount,
         progressPercent,
@@ -443,6 +492,12 @@ export default function TransactionsPage() {
     });
   }, [memberMatrix, memberStatusFilter, memberSearch]);
 
+  // Calculation values for Partial/Full payment modal
+  const origDue = collectingTrx ? Number(collectingTrx.amount) : 0;
+  const numInputPaid = Number(paidAmountInput) || 0;
+  const computedRemainingDue = Math.max(0, Math.round((origDue - numInputPaid) * 100) / 100);
+  const isFullSettlement = computedRemainingDue === 0 && numInputPaid >= origDue;
+
   return (
     <div className="space-y-5">
       {/* Top Header */}
@@ -450,7 +505,7 @@ export default function TransactionsPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Transactions & Billing</h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            Manage created fee campaigns, monitor real-time member payment progress lines, and view per-member dues.
+            Manage fee campaigns, collect partial/full payments with live remaining due calculation, and track member dues.
           </p>
         </div>
         {staff && (
@@ -757,7 +812,7 @@ export default function TransactionsPage() {
                                     Assigned Member Payment Statuses for &ldquo;{group.title}&rdquo;
                                   </h4>
                                   <span className="text-xs text-slate-500">
-                                    {group.paidCount} of {group.totalMembersAssigned} member payments collected ({group.progressPercent}%)
+                                    {group.paidCount} of {group.totalMembersAssigned} members cleared ({group.progressPercent}% of amount collected)
                                   </span>
                                 </div>
 
@@ -786,7 +841,7 @@ export default function TransactionsPage() {
                                             <TableCell>
                                               {isPending ? (
                                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300">
-                                                  <Clock className="h-3 w-3 text-amber-600" /> Pending
+                                                  <Clock className="h-3 w-3 text-amber-600" /> Pending Due
                                                 </span>
                                               ) : (
                                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300">
@@ -798,11 +853,10 @@ export default function TransactionsPage() {
                                               {isPending ? (
                                                 <Button
                                                   size="sm"
-                                                  onClick={() => handleMarkAsPaid(trx.id)}
-                                                  disabled={isUpdating}
-                                                  className="h-7 text-xs bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer"
+                                                  onClick={() => openCollectPaymentModal(trx)}
+                                                  className="h-7 text-xs bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer shadow-2xs"
                                                 >
-                                                  <Check className="h-3 w-3 mr-1" /> Mark Paid
+                                                  <Wallet className="h-3 w-3 mr-1" /> Collect / Partial Pay
                                                 </Button>
                                               ) : (
                                                 <span className="text-[11px] text-slate-400 font-medium">Cleared</span>
@@ -1078,11 +1132,11 @@ export default function TransactionsPage() {
                               Unpaid / Pending Payment Dues ({pendingTransactions.length})
                             </h4>
 
-                            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                            <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
                               {pendingTransactions.map((pt) => (
                                 <div
                                   key={pt.id}
-                                  className="p-3 bg-white rounded-lg border border-amber-300 shadow-2xs flex flex-col justify-between gap-2"
+                                  className="p-3.5 bg-white rounded-lg border border-amber-300 shadow-2xs flex flex-col justify-between gap-3"
                                 >
                                   <div>
                                     <div className="flex items-center justify-between">
@@ -1097,16 +1151,20 @@ export default function TransactionsPage() {
                                       <span>Due Date: {pt.transaction_date}</span>
                                       <span className="font-mono text-[10px] text-slate-400">{pt.transaction_no}</span>
                                     </div>
+                                    {pt.description && pt.description.includes('Remaining due') && (
+                                      <p className="text-[10px] text-amber-700 mt-1 font-medium bg-amber-50 p-1 rounded">
+                                        {pt.description}
+                                      </p>
+                                    )}
                                   </div>
 
                                   {staff && (
                                     <Button
                                       size="sm"
-                                      onClick={() => handleMarkAsPaid(pt.id)}
-                                      disabled={isUpdating}
-                                      className="w-full h-7 text-xs bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer"
+                                      onClick={() => openCollectPaymentModal(pt)}
+                                      className="w-full h-8 text-xs bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer shadow-2xs"
                                     >
-                                      <Check className="h-3 w-3 mr-1" /> Mark Received / Paid
+                                      <Wallet className="h-3.5 w-3.5 mr-1" /> Collect / Partial Pay
                                     </Button>
                                   )}
                                 </div>
@@ -1164,6 +1222,192 @@ export default function TransactionsPage() {
           </div>
         </div>
       )}
+
+      {/* =========================================================================
+          DIALOG: COLLECT PAYMENT (PARTIAL OR FULL WITH REMAINING DUE CALCULATION)
+          ========================================================================= */}
+      <Dialog open={openCollect} onOpenChange={setOpenCollect}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-slate-900">
+              <Wallet className="h-5 w-5 text-emerald-700" />
+              Collect Payment & Settle Dues
+            </DialogTitle>
+          </DialogHeader>
+
+          {collectingTrx && (
+            <form onSubmit={onConfirmCollection} className="space-y-4 pt-2">
+              {/* Member and Fee Information Card */}
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <div>
+                    <span className="text-slate-500 block">Member</span>
+                    <span className="font-bold text-slate-900 text-sm">{collectingTrx.member?.name ?? '-'}</span>
+                    {collectingTrx.member?.member_no && (
+                      <span className="text-[10px] font-mono text-emerald-800 ml-1.5 font-bold">
+                        (ID: {collectingTrx.member.member_no})
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="text-right">
+                    <span className="text-slate-500 block">Total Due Amount</span>
+                    <span className="text-base font-bold text-slate-900 font-mono">
+                      BDT {origDue.toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="text-[11px] text-slate-600 border-t border-slate-200/80 pt-1.5 flex justify-between">
+                  <span>Fee Item: <b>{collectingTrx.month || collectingTrx.description || collectingTrx.type}</b></span>
+                  <span className="font-mono text-slate-400">{collectingTrx.transaction_no}</span>
+                </div>
+              </div>
+
+              {/* Paid Amount Input Field */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label className="font-bold text-slate-900 text-xs flex items-center gap-1">
+                    <Calculator className="h-3.5 w-3.5 text-emerald-700" />
+                    Paid Amount (BDT Input Value)
+                  </Label>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setPaidAmountInput(String(origDue))}
+                      className="text-[11px] font-bold text-emerald-800 hover:underline cursor-pointer bg-emerald-50 px-2 py-0.5 rounded"
+                    >
+                      Pay Full (BDT {origDue})
+                    </button>
+                    {origDue >= 2 && (
+                      <button
+                        type="button"
+                        onClick={() => setPaidAmountInput(String(origDue / 2))}
+                        className="text-[11px] font-bold text-slate-700 hover:underline cursor-pointer bg-slate-100 px-2 py-0.5 rounded"
+                      >
+                        50% (BDT {origDue / 2})
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  placeholder="Enter amount member is paying"
+                  value={paidAmountInput}
+                  onChange={(e) => setPaidAmountInput(e.target.value)}
+                  className="bg-white text-base font-bold font-mono text-slate-900 border-emerald-600 focus:ring-emerald-700"
+                  required
+                  autoFocus
+                />
+              </div>
+
+              {/* Live Remaining Due Calculation Display */}
+              <div className={`p-3.5 rounded-xl border transition-all ${
+                isFullSettlement
+                  ? 'bg-emerald-50 border-emerald-300'
+                  : 'bg-amber-50 border-amber-300'
+              }`}>
+                <div className="flex items-center justify-between text-xs font-bold">
+                  <span className="flex items-center gap-1.5">
+                    {isFullSettlement ? (
+                      <>
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                        <span className="text-emerald-900">Payment Status: Full Payment</span>
+                      </>
+                    ) : (
+                      <>
+                        <Clock className="h-4 w-4 text-amber-600" />
+                        <span className="text-amber-950">Payment Status: Partial Payment</span>
+                      </>
+                    )}
+                  </span>
+
+                  <span className={`font-mono text-sm ${
+                    isFullSettlement ? 'text-emerald-800' : 'text-amber-900'
+                  }`}>
+                    {isFullSettlement ? 'BDT 0.00 Remaining Due' : `BDT ${computedRemainingDue.toLocaleString()} Remaining Due`}
+                  </span>
+                </div>
+
+                {!isFullSettlement && computedRemainingDue > 0 && (
+                  <p className="text-[11px] text-amber-800 mt-1.5">
+                    A new pending due transaction of <b>BDT {computedRemainingDue.toLocaleString()}</b> will remain on the member&rsquo;s account until cleared.
+                  </p>
+                )}
+              </div>
+
+              {/* Payment Method & Date */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs font-bold text-slate-900">Payment Method</Label>
+                  <select
+                    className="w-full border border-slate-300 rounded-md p-2 bg-white text-xs mt-1 font-medium cursor-pointer"
+                    value={paymentMethod}
+                    onChange={(e: any) => setPaymentMethod(e.target.value)}
+                  >
+                    <option value="cash">Cash in Hand</option>
+                    <option value="mobile_banking">Mobile Banking (bKash / Nagad / Rocket)</option>
+                    <option value="bank">Bank Transfer / Deposit</option>
+                    <option value="other">Other Method</option>
+                  </select>
+                </div>
+
+                <div>
+                  <Label className="text-xs font-bold text-slate-900">Payment Date</Label>
+                  <Input
+                    type="date"
+                    value={paymentDate}
+                    onChange={(e) => setPaymentDate(e.target.value)}
+                    className="bg-white mt-1 text-xs"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Optional Notes */}
+              <div>
+                <Label className="text-xs text-slate-600">Payment Notes / Reference (Optional)</Label>
+                <Input
+                  placeholder="e.g. bKash TrxID: 9X29A..., Received at monthly meeting"
+                  value={paymentNotes}
+                  onChange={(e) => setPaymentNotes(e.target.value)}
+                  className="bg-white mt-1 text-xs"
+                />
+              </div>
+
+              {/* Receipt Generation Toggle */}
+              <label className="flex items-center gap-2 cursor-pointer select-none bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                <input
+                  type="checkbox"
+                  checked={createReceipt}
+                  onChange={(e) => setCreateReceipt(e.target.checked)}
+                  className="rounded text-emerald-700 focus:ring-emerald-700"
+                />
+                <span className="text-xs font-semibold text-slate-800 flex items-center gap-1">
+                  <ReceiptIcon className="h-3.5 w-3.5 text-emerald-700" />
+                  Generate Official Printable Receipt for BDT {numInputPaid.toLocaleString()}
+                </span>
+              </label>
+
+              <DialogFooter className="pt-2">
+                <Button type="button" variant="outline" onClick={() => setOpenCollect(false)} className="cursor-pointer">
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isCollecting}
+                  className="cursor-pointer bg-emerald-700 hover:bg-emerald-800 text-white font-bold"
+                >
+                  {isCollecting ? 'Processing...' : `Confirm & Settle (BDT ${numInputPaid.toLocaleString()})`}
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* =========================================================================
           DIALOG 1: CREATE / ASSIGN PAYMENT DEMAND (SUPER ADMIN & ADMIN)

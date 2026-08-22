@@ -132,6 +132,26 @@ export const api = createApi({
       query: (body) => ({ url: '/transactions/generate-payments', method: 'POST', body }),
       invalidatesTags: ['Transactions', 'Receipts', 'Notifications'],
     }),
+    collectPayment: builder.mutation<{
+      message: string;
+      status: 'paid' | 'partial';
+      paid_amount: number;
+      remaining_due: number;
+      transaction: T.Transaction;
+      remaining_trx?: T.Transaction;
+    }, {
+      id: number;
+      body: {
+        paid_amount: number;
+        payment_method?: string;
+        payment_date?: string;
+        notes?: string;
+        create_receipt?: boolean;
+      };
+    }>({
+      query: ({ id, body }) => ({ url: `/transactions/${id}/collect-payment`, method: 'POST', body }),
+      invalidatesTags: ['Transactions', 'Receipts', 'Notifications'],
+    }),
     getReport: builder.query<T.TransactionList, { from?: string; to?: string; type?: string; page?: number; per_page?: number } | void>({
       query: (params) => ({ url: '/reports/transactions', params: params || undefined }),
     }),
@@ -238,6 +258,7 @@ export const {
   useGetUsersQuery, useCreateUserMutation, useUpdateUserMutation, useDeleteUserMutation,
   useAssignRoleMutation, useGetRolesQuery, useGetPermissionsQuery, useCreateRoleMutation, useUpdateRoleMutation, useDeleteRoleMutation,
   useGetTransactionsQuery, useCreateTransactionMutation, useUpdateTransactionMutation,
+  useCollectPaymentMutation,
   useDeleteTransactionMutation, useGeneratePaymentsMutation, useGetReportQuery,
   useGetReceiptsQuery, useCreateReceiptMutation, useUpdateReceiptMutation, useDeleteReceiptMutation,
   useGetMeetingExpensesQuery, useCreateMeetingExpenseMutation, useDeleteMeetingExpenseMutation,
