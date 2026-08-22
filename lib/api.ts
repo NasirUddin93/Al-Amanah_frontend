@@ -1,0 +1,224 @@
+import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
+import type * as T from '@/types';
+
+const baseQuery = fetchBaseQuery({
+  baseUrl: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api',
+  prepareHeaders: (headers) => {
+    if (typeof window !== 'undefined') {
+      const token = localStorage.getItem('token');
+      if (token) headers.set('Authorization', `Bearer ${token}`);
+    }
+    headers.set('Accept', 'application/json');
+    return headers;
+  },
+});
+
+export const api = createApi({
+  reducerPath: 'api',
+  baseQuery,
+  tagTypes: ['Users', 'Roles', 'Permissions', 'Transactions', 'Receipts', 'MeetingExpenses', 'Fdrs',
+             'Notifications', 'Settings', 'AdminPermissions', 'ProfileShares', 'ActivityLogs'],
+  endpoints: (builder) => ({
+
+    /* ---------- Auth ---------- */
+    login: builder.mutation<{ user: T.User; token: string }, { email: string; password: string }>({
+      query: (body) => ({ url: '/login', method: 'POST', body }),
+      transformResponse: (res: any) => {
+        const rawUser = res.user?.data || res.user || res.data?.user || res.data;
+        return {
+          user: rawUser,
+          token: res.token || res.access_token,
+        };
+      },
+    }),
+    me: builder.query<T.User, void>({
+      query: () => '/me',
+      transformResponse: (res: any) => res.data || res,
+    }),
+    logout: builder.mutation<{ message: string }, void>({ query: () => ({ url: '/logout', method: 'POST' }) }),
+
+    /* ---------- Users / Roles ---------- */
+    getUsers: builder.query<T.Paginated<T.User>, {
+      page?: number;
+      per_page?: number;
+      search?: string;
+      role_id?: number | string;
+      status?: string;
+      sort_by?: string;
+      sort_order?: 'asc' | 'desc';
+    } | void>({
+      query: (params) => ({ url: '/users', params: params || undefined }),
+      providesTags: ['Users'],
+    }),
+    createUser: builder.mutation<T.User, any>({
+      query: (body) => ({ url: '/users', method: 'POST', body }),
+      invalidatesTags: ['Users'],
+    }),
+    updateUser: builder.mutation<T.User, { id: number; body: any }>({
+      query: ({ id, body }) => ({ url: `/users/${id}`, method: 'PUT', body }),
+      invalidatesTags: ['Users'],
+    }),
+    deleteUser: builder.mutation<{ message: string }, number>({
+      query: (id) => ({ url: `/users/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['Users'],
+    }),
+    assignRole: builder.mutation<T.User, { userId: number; role_id: number; designation?: string }>({
+      query: ({ userId, ...body }) => ({ url: `/users/${userId}/assign-role`, method: 'POST', body }),
+      invalidatesTags: ['Users'],
+    }),
+    getRoles: builder.query<T.Role[], void>({
+      query: () => '/roles',
+      providesTags: ['Roles'],
+    }),
+    getPermissions: builder.query<T.Permission[], void>({
+      query: () => '/permissions',
+      providesTags: ['Permissions'],
+    }),
+    createRole: builder.mutation<T.Role, { name: string; description?: string; permissions?: number[] }>({
+      query: (body) => ({ url: '/roles', method: 'POST', body }),
+      invalidatesTags: ['Roles'],
+    }),
+    updateRole: builder.mutation<T.Role, { id: number; body: { name?: string; description?: string; permissions?: number[] } }>({
+      query: ({ id, body }) => ({ url: `/roles/${id}`, method: 'PUT', body }),
+      invalidatesTags: ['Roles', 'Users'],
+    }),
+    deleteRole: builder.mutation<{ message: string }, number>({
+      query: (id) => ({ url: `/roles/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['Roles'],
+    }),
+
+    /* ---------- Transactions ---------- */
+    getTransactions: builder.query<T.TransactionList, { page?: number; type?: string } | void>({
+      query: (params) => ({ url: '/transactions', params: params || undefined }),
+      providesTags: ['Transactions'],
+    }),
+    createTransaction: builder.mutation<T.Transaction, any>({
+      query: (body) => ({ url: '/transactions', method: 'POST', body }),
+      invalidatesTags: ['Transactions'],
+    }),
+    updateTransaction: builder.mutation<T.Transaction, { id: number; body: any }>({
+      query: ({ id, body }) => ({ url: `/transactions/${id}`, method: 'PUT', body }),
+      invalidatesTags: ['Transactions'],
+    }),
+    deleteTransaction: builder.mutation<{ message: string }, number>({
+      query: (id) => ({ url: `/transactions/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['Transactions'],
+    }),
+    generatePayments: builder.mutation<{ message: string; count: number }, {
+      payment_category: 'monthly_payment' | 'one_time';
+      member_ids: (number | string)[];
+      amount: number;
+      months?: string[];
+      title?: string;
+      due_date?: string;
+      description?: string;
+    }>({
+      query: (body) => ({ url: '/transactions/generate-payments', method: 'POST', body }),
+      invalidatesTags: ['Transactions', 'Receipts', 'Notifications'],
+    }),
+    getReport: builder.query<T.TransactionList, { from?: string; to?: string; type?: string; page?: number; per_page?: number } | void>({
+      query: (params) => ({ url: '/reports/transactions', params: params || undefined }),
+    }),
+
+    /* ---------- Receipts ---------- */
+    getReceipts: builder.query<T.Paginated<T.Receipt>, { page?: number } | void>({
+      query: (params) => ({ url: '/receipts', params: params || undefined }),
+      providesTags: ['Receipts'],
+    }),
+    createReceipt: builder.mutation<T.Receipt, any>({
+      query: (body) => ({ url: '/receipts', method: 'POST', body }),
+      invalidatesTags: ['Receipts'],
+    }),
+    updateReceipt: builder.mutation<T.Receipt, { id: number; body: any }>({
+      query: ({ id, body }) => ({ url: `/receipts/${id}`, method: 'PUT', body }),
+      invalidatesTags: ['Receipts'],
+    }),
+    deleteReceipt: builder.mutation<{ message: string }, number>({
+      query: (id) => ({ url: `/receipts/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['Receipts'],
+    }),
+
+    /* ---------- Meeting Expenses ---------- */
+    getMeetingExpenses: builder.query<T.Paginated<T.MeetingExpense>, void>({
+      query: () => '/meeting-expenses',
+      providesTags: ['MeetingExpenses'],
+    }),
+    createMeetingExpense: builder.mutation<T.MeetingExpense, any>({
+      query: (body) => ({ url: '/meeting-expenses', method: 'POST', body }),
+      invalidatesTags: ['MeetingExpenses'],
+    }),
+    deleteMeetingExpense: builder.mutation<{ message: string }, number>({
+      query: (id) => ({ url: `/meeting-expenses/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['MeetingExpenses'],
+    }),
+
+    /* ---------- FDR ---------- */
+    getFdrs: builder.query<T.Paginated<T.Fdr>, void>({
+      query: () => '/fdrs',
+      providesTags: ['Fdrs'],
+    }),
+    createFdr: builder.mutation<T.Fdr, any>({
+      query: (body) => ({ url: '/fdrs', method: 'POST', body }),
+      invalidatesTags: ['Fdrs'],
+    }),
+    deleteFdr: builder.mutation<{ message: string }, number>({
+      query: (id) => ({ url: `/fdrs/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['Fdrs'],
+    }),
+
+    /* ---------- Notifications ---------- */
+    getNotifications: builder.query<T.Paginated<T.AppNotification>, { page?: number } | void>({
+      query: (params) => ({ url: '/notifications', params: params || undefined }),
+      providesTags: ['Notifications'],
+    }),
+    markRead: builder.mutation<T.AppNotification, number>({
+      query: (id) => ({ url: `/notifications/${id}/read`, method: 'POST' }),
+      invalidatesTags: ['Notifications'],
+    }),
+    markAllRead: builder.mutation<{ message: string }, void>({
+      query: () => ({ url: '/notifications/read-all', method: 'POST' }),
+      invalidatesTags: ['Notifications'],
+    }),
+
+    /* ---------- Settings ---------- */
+    getSettings: builder.query<T.Setting[], void>({
+      query: () => '/settings',
+      providesTags: ['Settings'],
+    }),
+    updateSetting: builder.mutation<T.Setting, { setting_key: string; setting_value: string }>({
+      query: (body) => ({ url: '/settings', method: 'PUT', body }),
+      invalidatesTags: ['Settings'],
+    }),
+
+    /* ---------- Admin Payment Permissions ---------- */
+    getAdminPermissions: builder.query<T.Paginated<T.AdminPaymentPermission>, void>({
+      query: () => '/admin-payment-permissions',
+      providesTags: ['AdminPermissions'],
+    }),
+    assignPaymentPermission: builder.mutation<T.AdminPaymentPermission, { admin_user_id: number; can_change_payment: boolean }>({
+      query: (body) => ({ url: '/admin-payment-permissions', method: 'POST', body }),
+      invalidatesTags: ['AdminPermissions'],
+    }),
+
+    /* ---------- Activity Logs ---------- */
+    getActivityLogs: builder.query<T.Paginated<T.ActivityLog>, { page?: number } | void>({
+      query: (params) => ({ url: '/activity-logs', params: params || undefined }),
+      providesTags: ['ActivityLogs'],
+    }),
+  }),
+});
+
+export const {
+  useLoginMutation, useMeQuery, useLogoutMutation,
+  useGetUsersQuery, useCreateUserMutation, useUpdateUserMutation, useDeleteUserMutation,
+  useAssignRoleMutation, useGetRolesQuery, useGetPermissionsQuery, useCreateRoleMutation, useUpdateRoleMutation, useDeleteRoleMutation,
+  useGetTransactionsQuery, useCreateTransactionMutation, useUpdateTransactionMutation,
+  useDeleteTransactionMutation, useGeneratePaymentsMutation, useGetReportQuery,
+  useGetReceiptsQuery, useCreateReceiptMutation, useUpdateReceiptMutation, useDeleteReceiptMutation,
+  useGetMeetingExpensesQuery, useCreateMeetingExpenseMutation, useDeleteMeetingExpenseMutation,
+  useGetFdrsQuery, useCreateFdrMutation, useDeleteFdrMutation,
+  useGetNotificationsQuery, useMarkReadMutation, useMarkAllReadMutation,
+  useGetSettingsQuery, useUpdateSettingMutation,
+  useGetAdminPermissionsQuery, useAssignPaymentPermissionMutation,
+  useGetActivityLogsQuery,
+} = api;
