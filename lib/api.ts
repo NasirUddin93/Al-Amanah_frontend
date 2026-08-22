@@ -95,7 +95,14 @@ export const api = createApi({
     }),
 
     /* ---------- Transactions ---------- */
-    getTransactions: builder.query<T.TransactionList, { page?: number; type?: string } | void>({
+    getTransactions: builder.query<T.TransactionList, {
+      page?: number;
+      per_page?: number;
+      type?: string;
+      status?: string;
+      member_id?: number | string;
+      payment_category?: string;
+    } | void>({
       query: (params) => ({ url: '/transactions', params: params || undefined }),
       providesTags: ['Transactions'],
     }),
