@@ -25,6 +25,13 @@ export interface User {
   role?: Role; member_profile?: MemberProfile; created_at: string; updated_at?: string;
 }
 
+export interface AdminModifier {
+  id: number;
+  name: string;
+  role?: string;
+  action?: 'Created' | 'Updated' | string;
+}
+
 export interface Transaction {
   id: number;
   transaction_no: string;
@@ -36,9 +43,12 @@ export interface Transaction {
   transaction_date: string;
   description?: string;
   member?: { id: number; name: string; member_no?: string };
-  created_by?: string;
+  created_by?: AdminModifier | string;
+  updated_by?: AdminModifier | string;
+  last_modified_by?: AdminModifier;
   receipt?: Receipt;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface TransactionList {

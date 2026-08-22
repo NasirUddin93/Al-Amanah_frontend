@@ -301,6 +301,41 @@ export default function TransactionsPage() {
     });
   }, [memberMatrix, memberStatusFilter, memberSearch]);
 
+  // Helper to extract last modifier (admin / super admin)
+  const getModifierInfo = (t: Transaction) => {
+    if (t.last_modified_by && typeof t.last_modified_by === 'object') {
+      return {
+        name: t.last_modified_by.name,
+        role: t.last_modified_by.role || 'Admin',
+        action: t.last_modified_by.action || 'Created',
+      };
+    }
+
+    if (t.updated_by) {
+      if (typeof t.updated_by === 'object') {
+        return {
+          name: t.updated_by.name,
+          role: t.updated_by.role || 'Admin',
+          action: 'Updated',
+        };
+      }
+      return { name: t.updated_by, role: 'Admin', action: 'Updated' };
+    }
+
+    if (t.created_by) {
+      if (typeof t.created_by === 'object') {
+        return {
+          name: t.created_by.name,
+          role: t.created_by.role || 'Admin',
+          action: 'Created',
+        };
+      }
+      return { name: t.created_by, role: 'Admin', action: 'Created' };
+    }
+
+    return { name: 'Super Admin', role: 'super_admin', action: 'Created' };
+  };
+
   // Filtered transactions for Tab 1 search
   const displayedTransactions = useMemo(() => {
     const list = pagedData?.data || [];
@@ -308,12 +343,13 @@ export default function TransactionsPage() {
 
     const q = searchQuery.toLowerCase();
     return list.filter((t) => {
+      const modifier = getModifierInfo(t);
       const noMatch = t.transaction_no.toLowerCase().includes(q);
-      const nameMatch = t.member?.name?.toLowerCase().includes(q);
-      const idMatch = t.member?.member_no?.toLowerCase().includes(q);
+      const modifierMatch = modifier.name.toLowerCase().includes(q) || modifier.role.toLowerCase().includes(q);
       const descMatch = t.description?.toLowerCase().includes(q);
       const monthMatch = t.month?.toLowerCase().includes(q);
-      return noMatch || nameMatch || idMatch || descMatch || monthMatch;
+      const typeMatch = t.type?.toLowerCase().includes(q);
+      return noMatch || modifierMatch || descMatch || monthMatch || typeMatch;
     });
   }, [pagedData, searchQuery]);
 
@@ -470,12 +506,12 @@ export default function TransactionsPage() {
                 <TableHeader className="bg-slate-50/80">
                   <TableRow>
                     <TableHead className="font-bold text-slate-900">Transaction No</TableHead>
-                    <TableHead className="font-bold text-slate-900">Member</TableHead>
+                    <TableHead className="font-bold text-slate-900">Created / Updated By</TableHead>
                     <TableHead className="font-bold text-slate-900">Type / Category</TableHead>
                     <TableHead className="font-bold text-slate-900">Month / Description</TableHead>
                     <TableHead className="font-bold text-slate-900">Amount</TableHead>
                     <TableHead className="font-bold text-slate-900">Status</TableHead>
-                    <TableHead className="font-bold text-slate-900">Date</TableHead>
+                    <TableHead className="font-bold text-slate-900">Updated Date</TableHead>
                     {staff && <TableHead className="text-right font-bold text-slate-900">Actions</TableHead>}
                   </TableRow>
                 </TableHeader>
@@ -488,16 +524,30 @@ export default function TransactionsPage() {
                   )}
                   {displayedTransactions.map((t) => {
                     const isPending = t.status === 'pending';
+                    const modifier = getModifierInfo(t);
+                    const displayDate = t.updated_at || t.created_at || t.transaction_date;
 
                     return (
                       <TableRow key={t.id} className="hover:bg-slate-50/70 transition-colors">
                         <TableCell className="font-mono text-xs font-bold text-slate-900">{t.transaction_no}</TableCell>
                         <TableCell>
-                          <div className="flex flex-col">
-                            <span className="font-semibold text-slate-900 text-xs">{t.member?.name ?? '-'}</span>
-                            {t.member?.member_no && (
-                              <span className="font-mono text-[10px] text-emerald-800 font-bold">ID: {t.member.member_no}</span>
-                            )}
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-semibold text-slate-900 text-xs">{modifier.name}</span>
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] px-1.5 py-0 capitalize ${
+                                  modifier.role?.toLowerCase().includes('super')
+                                    ? 'bg-purple-50 text-purple-800 border-purple-200'
+                                    : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                }`}
+                              >
+                                {modifier.role?.replace(/_/g, ' ')}
+                              </Badge>
+                            </div>
+                            <span className="text-[10px] text-slate-500">
+                              {modifier.action} entry
+                            </span>
                           </div>
                         </TableCell>
                         <TableCell>
@@ -533,7 +583,9 @@ export default function TransactionsPage() {
                             </span>
                           )}
                         </TableCell>
-                        <TableCell className="text-xs text-slate-600">{t.transaction_date}</TableCell>
+                        <TableCell className="text-xs text-slate-600 font-medium whitespace-nowrap">
+                          {displayDate}
+                        </TableCell>
                         {staff && (
                           <TableCell className="text-right space-x-1.5 whitespace-nowrap">
                             {isPending && (
