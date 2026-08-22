@@ -505,10 +505,12 @@ export default function TransactionsPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Transactions & Billing</h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            Manage fee campaigns, collect partial/full payments with live remaining due calculation, and track member dues.
+            {activeTab === 'created'
+              ? 'Create monthly subscriptions & one-time dues, and track campaign collection progress lines.'
+              : 'Monitor member payment statuses, total paid contributions, and collect pending dues with live settlement.'}
           </p>
         </div>
-        {staff && (
+        {staff && activeTab === 'created' && (
           <div className="flex items-center gap-2.5 flex-wrap">
             <Button
               onClick={() => {
@@ -1090,23 +1092,11 @@ export default function TransactionsPage() {
 
                       {/* Right: Actions */}
                       <div className="flex items-center gap-2 shrink-0">
-                        {staff && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleAssignToSpecificMember(member.id)}
-                            className="h-8 text-xs cursor-pointer border-slate-200 hover:bg-slate-100"
-                          >
-                            <CalendarCheck className="h-3.5 w-3.5 mr-1 text-emerald-700" />
-                            Assign Due
-                          </Button>
-                        )}
-
                         <Button
                           size="sm"
-                          variant="ghost"
+                          variant="outline"
                           onClick={() => toggleExpandMember(member.id)}
-                          className="h-8 text-xs cursor-pointer text-slate-700 hover:bg-slate-100"
+                          className="h-8 text-xs cursor-pointer text-slate-700 border-slate-200 hover:bg-slate-100"
                         >
                           {isExpanded ? (
                             <>
@@ -1114,7 +1104,7 @@ export default function TransactionsPage() {
                             </>
                           ) : (
                             <>
-                              View Details ({item.transactions.length}) <ChevronDown className="h-3.5 w-3.5 ml-1" />
+                              View Dues & History ({item.transactions.length}) <ChevronDown className="h-3.5 w-3.5 ml-1" />
                             </>
                           )}
                         </Button>
