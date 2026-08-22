@@ -161,7 +161,8 @@ export default function TransactionsPage() {
             <Button
               onClick={() => {
                 // Auto-set default monthly amount from settings if available
-                const defaultFee = settings?.find((s) => s.setting_key === 'payment_amount_1')?.setting_value || '50';
+                const settingsList = Array.isArray(settings) ? settings : (settings as any)?.data || [];
+                const defaultFee = settingsList.find((s: any) => s.setting_key === 'payment_amount_1')?.setting_value || '50';
                 setDemandAmount(defaultFee);
                 setOpenDemand(true);
               }}

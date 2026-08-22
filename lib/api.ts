@@ -52,10 +52,12 @@ export const api = createApi({
     }),
     createUser: builder.mutation<T.User, any>({
       query: (body) => ({ url: '/users', method: 'POST', body }),
+      transformResponse: (res: any) => res?.data || res,
       invalidatesTags: ['Users'],
     }),
     updateUser: builder.mutation<T.User, { id: number; body: any }>({
       query: ({ id, body }) => ({ url: `/users/${id}`, method: 'PUT', body }),
+      transformResponse: (res: any) => res?.data || res,
       invalidatesTags: ['Users'],
     }),
     deleteUser: builder.mutation<{ message: string }, number>({
@@ -64,22 +66,27 @@ export const api = createApi({
     }),
     assignRole: builder.mutation<T.User, { userId: number; role_id: number; designation?: string }>({
       query: ({ userId, ...body }) => ({ url: `/users/${userId}/assign-role`, method: 'POST', body }),
+      transformResponse: (res: any) => res?.data || res,
       invalidatesTags: ['Users'],
     }),
     getRoles: builder.query<T.Role[], void>({
       query: () => '/roles',
+      transformResponse: (res: any) => (Array.isArray(res) ? res : res?.data || []),
       providesTags: ['Roles'],
     }),
     getPermissions: builder.query<T.Permission[], void>({
       query: () => '/permissions',
+      transformResponse: (res: any) => (Array.isArray(res) ? res : res?.data || []),
       providesTags: ['Permissions'],
     }),
     createRole: builder.mutation<T.Role, { name: string; description?: string; permissions?: number[] }>({
       query: (body) => ({ url: '/roles', method: 'POST', body }),
+      transformResponse: (res: any) => res?.data || res,
       invalidatesTags: ['Roles'],
     }),
     updateRole: builder.mutation<T.Role, { id: number; body: { name?: string; description?: string; permissions?: number[] } }>({
       query: ({ id, body }) => ({ url: `/roles/${id}`, method: 'PUT', body }),
+      transformResponse: (res: any) => res?.data || res,
       invalidatesTags: ['Roles', 'Users'],
     }),
     deleteRole: builder.mutation<{ message: string }, number>({
@@ -94,10 +101,12 @@ export const api = createApi({
     }),
     createTransaction: builder.mutation<T.Transaction, any>({
       query: (body) => ({ url: '/transactions', method: 'POST', body }),
+      transformResponse: (res: any) => res?.data || res,
       invalidatesTags: ['Transactions'],
     }),
     updateTransaction: builder.mutation<T.Transaction, { id: number; body: any }>({
       query: ({ id, body }) => ({ url: `/transactions/${id}`, method: 'PUT', body }),
+      transformResponse: (res: any) => res?.data || res,
       invalidatesTags: ['Transactions'],
     }),
     deleteTransaction: builder.mutation<{ message: string }, number>({
@@ -127,10 +136,12 @@ export const api = createApi({
     }),
     createReceipt: builder.mutation<T.Receipt, any>({
       query: (body) => ({ url: '/receipts', method: 'POST', body }),
+      transformResponse: (res: any) => res?.data || res,
       invalidatesTags: ['Receipts'],
     }),
     updateReceipt: builder.mutation<T.Receipt, { id: number; body: any }>({
       query: ({ id, body }) => ({ url: `/receipts/${id}`, method: 'PUT', body }),
+      transformResponse: (res: any) => res?.data || res,
       invalidatesTags: ['Receipts'],
     }),
     deleteReceipt: builder.mutation<{ message: string }, number>({
@@ -145,6 +156,7 @@ export const api = createApi({
     }),
     createMeetingExpense: builder.mutation<T.MeetingExpense, any>({
       query: (body) => ({ url: '/meeting-expenses', method: 'POST', body }),
+      transformResponse: (res: any) => res?.data || res,
       invalidatesTags: ['MeetingExpenses'],
     }),
     deleteMeetingExpense: builder.mutation<{ message: string }, number>({
@@ -159,6 +171,7 @@ export const api = createApi({
     }),
     createFdr: builder.mutation<T.Fdr, any>({
       query: (body) => ({ url: '/fdrs', method: 'POST', body }),
+      transformResponse: (res: any) => res?.data || res,
       invalidatesTags: ['Fdrs'],
     }),
     deleteFdr: builder.mutation<{ message: string }, number>({
@@ -173,6 +186,7 @@ export const api = createApi({
     }),
     markRead: builder.mutation<T.AppNotification, number>({
       query: (id) => ({ url: `/notifications/${id}/read`, method: 'POST' }),
+      transformResponse: (res: any) => res?.data || res,
       invalidatesTags: ['Notifications'],
     }),
     markAllRead: builder.mutation<{ message: string }, void>({
@@ -183,10 +197,12 @@ export const api = createApi({
     /* ---------- Settings ---------- */
     getSettings: builder.query<T.Setting[], void>({
       query: () => '/settings',
+      transformResponse: (res: any) => (Array.isArray(res) ? res : res?.data || []),
       providesTags: ['Settings'],
     }),
     updateSetting: builder.mutation<T.Setting, { setting_key: string; setting_value: string }>({
       query: (body) => ({ url: '/settings', method: 'PUT', body }),
+      transformResponse: (res: any) => res?.data || res,
       invalidatesTags: ['Settings'],
     }),
 
@@ -197,6 +213,7 @@ export const api = createApi({
     }),
     assignPaymentPermission: builder.mutation<T.AdminPaymentPermission, { admin_user_id: number; can_change_payment: boolean }>({
       query: (body) => ({ url: '/admin-payment-permissions', method: 'POST', body }),
+      transformResponse: (res: any) => res?.data || res,
       invalidatesTags: ['AdminPermissions'],
     }),
 
@@ -205,6 +222,7 @@ export const api = createApi({
       query: (params) => ({ url: '/activity-logs', params: params || undefined }),
       providesTags: ['ActivityLogs'],
     }),
+
   }),
 });
 

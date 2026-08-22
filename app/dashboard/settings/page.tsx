@@ -41,7 +41,7 @@ function SettingsContent() {
         <p className="text-sm text-red-600">{(error as any).data.message}</p>
       )}
       {isLoading && <p className="text-slate-500">Loading...</p>}
-      {settings?.map((s) => (
+      {(Array.isArray(settings) ? settings : (settings as any)?.data || []).map((s: any) => (
         <Card key={s.id}>
           <CardHeader><CardTitle className="text-base text-slate-800">{s.setting_key}</CardTitle></CardHeader>
           <CardContent className="flex items-end gap-3">
