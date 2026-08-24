@@ -1,12 +1,11 @@
 'use client';
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useAppSelector } from '@/store/hooks';
 import { canManageTransactions } from '@/lib/roles';
 import {
   useGetTransactionsQuery,
-  useGetReceiptsQuery,
   useCreateTransactionMutation,
   useUpdateTransactionMutation,
   useCollectPaymentMutation,
@@ -26,8 +25,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { ReceiptSlipThumbnail, MagnifiableModalImage } from '@/components/receipt-magnifier';
-import { ReceiptPrintArea } from '@/components/receipt-print';
-import type { Transaction, User, Receipt } from '@/types';
+import type { Transaction, User } from '@/types';
 import {
   PlusCircle,
   CalendarCheck,
@@ -60,7 +58,6 @@ import {
   XCircle,
   Ban,
   FileCheck,
-  Printer,
 } from 'lucide-react';
 
 const MONTH_NAMES = [
@@ -86,12 +83,8 @@ export default function AdminTransactionsPage() {
   const [memberSearch, setMemberSearch] = useState('');
   const [expandedMembers, setExpandedMembers] = useState<Record<number, boolean>>({});
 
-  // Query all transactions and official receipts with real-time live polling
+  // Query all transactions for full progress & member computation with real-time live polling
   const { data: allTrxData, isLoading: loadingAllTrx } = useGetTransactionsQuery(
-    { per_page: 3000 },
-    { pollingInterval: 3000 }
-  );
-  const { data: receiptsData, isLoading: loadingReceipts } = useGetReceiptsQuery(
     { per_page: 3000 },
     { pollingInterval: 3000 }
   );
@@ -112,7 +105,6 @@ export default function AdminTransactionsPage() {
   // Modals
   const [openSingle, setOpenSingle] = useState(false);
   const [openDemand, setOpenDemand] = useState(false);
-  const [printReceipt, setPrintReceipt] = useState<Receipt | null>(null);
 
   // Rejection Modal State
   const [openRejectModal, setOpenRejectModal] = useState(false);
@@ -231,36 +223,10 @@ export default function AdminTransactionsPage() {
     }
   };
 
-  const handlePrint = (r?: Receipt | null, fallbackTrx?: Transaction | null) => {
-    if (r) {
-      setPrintReceipt(r);
-    } else if (fallbackTrx) {
-      const syntheticReceipt: Receipt = {
-        id: fallbackTrx.id,
-        receipt_no: fallbackTrx.receipt?.receipt_no || `RCT-${fallbackTrx.transaction_no}`,
-        receipt_date: fallbackTrx.transaction_date || new Date().toISOString().split('T')[0],
-        amount: Number(fallbackTrx.amount || 0),
-        payment_method: (fallbackTrx.member_payment_method as any) || 'cash',
-        member: fallbackTrx.member,
-        transaction: fallbackTrx,
-        created_at: fallbackTrx.created_at,
-        updated_at: fallbackTrx.updated_at,
-      };
-      setPrintReceipt(syntheticReceipt);
-    } else {
-      return;
-    }
-
-    setTimeout(() => {
-      window.print();
-    }, 150);
-  };
-
   // Open Collect Payment Modal (Auto-fill Member Proof Details for Admin)
   const openCollectPaymentModal = (trx: Transaction) => {
     setCollectingTrx(trx);
 
-    // Auto-fill from member's submitted proof if available, otherwise default to full due amount
     const defaultAmount =
       trx.member_paid_amount !== null && trx.member_paid_amount !== undefined
         ? String(trx.member_paid_amount)
@@ -272,7 +238,6 @@ export default function AdminTransactionsPage() {
 
     setPaymentDate(new Date().toISOString().split('T')[0]);
 
-    // Auto-fill reference code and member notes
     const noteParts: string[] = [];
     if (trx.member_trx_reference) {
       noteParts.push(`Ref: ${trx.member_trx_reference}`);
@@ -383,7 +348,6 @@ export default function AdminTransactionsPage() {
     setExpandedMembers((prev) => ({ ...prev, [memberId]: !prev[memberId] }));
   };
 
-  // Helper to extract last modifier (admin / super admin)
   const getModifierInfo = (t: Transaction | any) => {
     if (t.last_modified_by && typeof t.last_modified_by === 'object') {
       return {
@@ -427,9 +391,6 @@ export default function AdminTransactionsPage() {
     return allTrxData?.data || [];
   }, [allTrxData]);
 
-  // =========================================================================
-  // VIEW 1 DATA: Group transactions into created billing campaigns / demands
-  // =========================================================================
   const createdDemandGroups = useMemo(() => {
     const groups: Record<string, {
       key: string;
@@ -490,14 +451,12 @@ export default function AdminTransactionsPage() {
     });
 
     const groupList = Object.values(groups).map((g) => {
-      // Non-rejected (active) transactions vs archived rejected ones
       const activeTrx = g.transactions.filter((t) => t.status !== 'rejected');
       const targetTrxList = activeTrx.length > 0 ? activeTrx : g.transactions;
 
       const memberIds = new Set(targetTrxList.map((t) => t.member?.id).filter(Boolean));
       const totalMembersAssigned = memberIds.size || targetTrxList.length;
 
-      // Total target demand should only count active dues (paid + pending), not rejected duplicates
       const totalDemandAmount = targetTrxList.reduce((sum, t) => sum + Number(t.amount || 0), 0);
       const totalCollectedAmount = g.transactions
         .filter((t) => t.status === 'paid')
@@ -564,7 +523,6 @@ export default function AdminTransactionsPage() {
     });
   }, [allTransactions]);
 
-  // Filtered Created Records for View 1
   const filteredCreatedGroups = useMemo(() => {
     return createdDemandGroups.filter((g) => {
       if (createdStatusFilter === 'pending' && g.isFullyPaid) return false;
@@ -584,14 +542,10 @@ export default function AdminTransactionsPage() {
     });
   }, [createdDemandGroups, createdStatusFilter, createdSearch]);
 
-  // =========================================================================
-  // VIEW 2 DATA: Member-wise calculation
-  // =========================================================================
   const memberMatrix = useMemo(() => {
     const trxByMember: Record<number, Transaction[]> = {};
     const paidDueKeySet = new Set<string>();
     const paidMemberMonthSet = new Set<string>();
-    const memberMonthSlipMap = new Map<string, { photo: string; uploadedAt?: string; amount?: number; ref?: string; method?: string; comment?: string }>();
 
     allTransactions.forEach((t) => {
       const mId = t.member?.id;
@@ -599,32 +553,8 @@ export default function AdminTransactionsPage() {
         if (!trxByMember[mId]) trxByMember[mId] = [];
         trxByMember[mId].push(t);
       }
-
-      const memId = t.member?.id || (t as any).member_id;
-      if (memId && t.receipt_photo) {
-        if (t.month) {
-          memberMonthSlipMap.set(`${memId}___${t.month.trim().toLowerCase()}`, {
-            photo: t.receipt_photo,
-            uploadedAt: t.receipt_photo_uploaded_at,
-            amount: t.member_paid_amount ? Number(t.member_paid_amount) : undefined,
-            ref: t.member_trx_reference,
-            method: t.member_payment_method,
-            comment: t.member_comment,
-          });
-        }
-        if (t.description) {
-          memberMonthSlipMap.set(`${memId}___${t.description.trim().toLowerCase()}`, {
-            photo: t.receipt_photo,
-            uploadedAt: t.receipt_photo_uploaded_at,
-            amount: t.member_paid_amount ? Number(t.member_paid_amount) : undefined,
-            ref: t.member_trx_reference,
-            method: t.member_payment_method,
-            comment: t.member_comment,
-          });
-        }
-      }
-
       if (t.status === 'paid') {
+        const memId = t.member?.id || (t as any).member_id;
         if (memId) {
           if (t.month) paidMemberMonthSet.add(`${memId}___${t.month.trim().toLowerCase()}`);
           if (t.description) paidMemberMonthSet.add(`${memId}___${t.description.trim().toLowerCase()}`);
@@ -636,47 +566,8 @@ export default function AdminTransactionsPage() {
 
     return membersList.map((m) => {
       const memberTrx = trxByMember[m.id] || [];
-      const pendingTrxRaw = memberTrx.filter((t) => t.status === 'pending');
-      const paidTrxRaw = memberTrx.filter((t) => t.status === 'paid');
-
-      // Hydrate slip from sister transaction if partial payment split created an empty pending row
-      const pendingTrx = pendingTrxRaw.map((pt) => {
-        if (pt.receipt_photo) return pt;
-        const sisterSlip = (pt.month ? memberMonthSlipMap.get(`${m.id}___${pt.month.trim().toLowerCase()}`) : null) ||
-          (pt.description ? memberMonthSlipMap.get(`${m.id}___${pt.description.trim().toLowerCase()}`) : null);
-
-        if (sisterSlip) {
-          return {
-            ...pt,
-            receipt_photo: sisterSlip.photo,
-            receipt_photo_uploaded_at: sisterSlip.uploadedAt || pt.receipt_photo_uploaded_at,
-            member_paid_amount: sisterSlip.amount !== undefined ? sisterSlip.amount : pt.member_paid_amount,
-            member_trx_reference: sisterSlip.ref || pt.member_trx_reference,
-            member_payment_method: sisterSlip.method || pt.member_payment_method,
-            member_comment: sisterSlip.comment || pt.member_comment,
-          };
-        }
-        return pt;
-      });
-
-      const paidTrx = paidTrxRaw.map((pt) => {
-        if (pt.receipt_photo) return pt;
-        const sisterSlip = (pt.month ? memberMonthSlipMap.get(`${m.id}___${pt.month.trim().toLowerCase()}`) : null) ||
-          (pt.description ? memberMonthSlipMap.get(`${m.id}___${pt.description.trim().toLowerCase()}`) : null);
-
-        if (sisterSlip) {
-          return {
-            ...pt,
-            receipt_photo: sisterSlip.photo,
-            receipt_photo_uploaded_at: sisterSlip.uploadedAt || pt.receipt_photo_uploaded_at,
-            member_paid_amount: sisterSlip.amount !== undefined ? sisterSlip.amount : pt.member_paid_amount,
-            member_trx_reference: sisterSlip.ref || pt.member_trx_reference,
-            member_payment_method: sisterSlip.method || pt.member_payment_method,
-            member_comment: sisterSlip.comment || pt.member_comment,
-          };
-        }
-        return pt;
-      });
+      const pendingTrx = memberTrx.filter((t) => t.status === 'pending');
+      const paidTrx = memberTrx.filter((t) => t.status === 'paid');
 
       // Keep rejected transactions for dues that are NOT paid yet
       const rejectedTrx = memberTrx.filter((t) => {
@@ -712,7 +603,6 @@ export default function AdminTransactionsPage() {
     });
   }, [membersList, allTransactions]);
 
-  // Summary figures across all members
   const stats = useMemo(() => {
     const totalCollected = memberMatrix.reduce((s, m) => s + m.totalPaidAmount, 0);
     const totalPending = memberMatrix.reduce((s, m) => s + m.totalPendingAmount, 0);
@@ -733,7 +623,6 @@ export default function AdminTransactionsPage() {
     };
   }, [memberMatrix]);
 
-  // Filtered members for Tab 2
   const filteredMembers = useMemo(() => {
     return memberMatrix.filter((m) => {
       if (memberStatusFilter === 'pending' && !m.hasPending) return false;
@@ -753,18 +642,17 @@ export default function AdminTransactionsPage() {
     });
   }, [memberMatrix, memberStatusFilter, memberSearch]);
 
-  // Calculation values for Partial/Full payment modal
   const origDue = collectingTrx ? Number(collectingTrx.amount) : 0;
   const numInputPaid = Number(paidAmountInput) || 0;
   const computedRemainingDue = Math.max(0, Math.round((origDue - numInputPaid) * 100) / 100);
   const isFullSettlement = computedRemainingDue === 0 && numInputPaid >= origDue;
 
   return (
-    <div className={printReceipt ? 'space-y-5 print:hidden' : 'space-y-5'}>
+    <div className="space-y-5">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Transactions & Billing</h1>
+          <h1 className="text-2xl font-bold text-slate-900">Billing Demands & Transactions</h1>
           <p className="text-sm text-slate-500 mt-0.5">
             {activeTab === 'created'
               ? 'Create monthly subscriptions & one-time dues, track campaign collection progress lines, and view member receipt slips.'
@@ -797,9 +685,7 @@ export default function AdminTransactionsPage() {
         )}
       </div>
 
-      {/* =========================================================================
-          2 TOP-LEVEL TOGGLE PAGES / TABS
-          ========================================================================= */}
+      {/* 2 TOP-LEVEL TOGGLE PAGES / TABS */}
       <div className="flex items-center gap-2 border-b border-slate-200 pb-1">
         <button
           onClick={() => setActiveTab('created')}
@@ -840,12 +726,9 @@ export default function AdminTransactionsPage() {
         </button>
       </div>
 
-      {/* =========================================================================
-          VIEW 1: TRANSACTIONS & CREATED RECORDS (WITH MEMBER PROGRESS LINES)
-          ========================================================================= */}
+      {/* VIEW 1: TRANSACTIONS & CREATED RECORDS */}
       {activeTab === 'created' && (
         <div className="space-y-4">
-          {/* Quick Metrics Bar */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="p-3.5 bg-white border border-slate-200 rounded-xl shadow-2xs">
               <span className="text-[11px] uppercase tracking-wider font-bold text-slate-500 block">Total Created Fee Campaigns</span>
@@ -869,7 +752,6 @@ export default function AdminTransactionsPage() {
             </div>
           </div>
 
-          {/* Filter Strip */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
             <div className="flex items-center gap-1.5 flex-wrap">
               <button
@@ -919,7 +801,6 @@ export default function AdminTransactionsPage() {
             </div>
           </div>
 
-          {/* Created Demands Table with Real-Time Progress Lines */}
           <Card className="border-slate-200 shadow-xs overflow-hidden">
             <CardContent className="p-0">
               <Table>
@@ -948,7 +829,6 @@ export default function AdminTransactionsPage() {
                     return (
                       <React.Fragment key={group.key}>
                         <TableRow className="hover:bg-slate-50/70 transition-colors">
-                          {/* Col 1: Campaign Title and Fee */}
                           <TableCell>
                             <div className="space-y-1">
                               <div className="flex items-center gap-2 flex-wrap">
@@ -968,7 +848,6 @@ export default function AdminTransactionsPage() {
                             </div>
                           </TableCell>
 
-                          {/* Col 2: Created / Updated By (Admin) */}
                           <TableCell>
                             <div className="flex flex-col gap-0.5">
                               <div className="flex items-center gap-1.5 flex-wrap">
@@ -990,7 +869,6 @@ export default function AdminTransactionsPage() {
                             </div>
                           </TableCell>
 
-                          {/* Col 3: Real-Time Member Numbers & Progress Line */}
                           <TableCell>
                             <div className="space-y-1 max-w-xs">
                               <div className="flex items-center justify-between text-xs">
@@ -1010,7 +888,6 @@ export default function AdminTransactionsPage() {
                                 </span>
                               </div>
 
-                              {/* Visual Progress Line Bar */}
                               <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden flex border border-slate-200 shadow-inner">
                                 <div
                                   className={`h-full transition-all duration-500 ${
@@ -1035,7 +912,6 @@ export default function AdminTransactionsPage() {
                             </div>
                           </TableCell>
 
-                          {/* Col 4: Status: Pending -> Complete when line is full */}
                           <TableCell>
                             {group.isFullyPaid ? (
                               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 shadow-2xs">
@@ -1050,12 +926,10 @@ export default function AdminTransactionsPage() {
                             )}
                           </TableCell>
 
-                          {/* Col 5: Updated Date */}
                           <TableCell className="text-xs text-slate-600 font-medium whitespace-nowrap">
                             {displayDate}
                           </TableCell>
 
-                          {/* Col 6: Expand Members Breakdown */}
                           <TableCell className="text-right whitespace-nowrap">
                             <Button
                               size="sm"
@@ -1103,11 +977,62 @@ export default function AdminTransactionsPage() {
                                     </TableHeader>
                                     <TableBody>
                                       {(() => {
-                                        const currentTransactions = [...group.transactions].sort((a, b) => {
-                                          const dateA = a.created_at || a.updated_at || a.transaction_date || '';
-                                          const dateB = b.created_at || b.updated_at || b.transaction_date || '';
-                                          return dateB.localeCompare(dateA) || (b.id || 0) - (a.id || 0);
+                                        const memberTrxMap: Record<string | number, any[]> = {};
+
+                                        // Group all transactions in this campaign by member
+                                        group.transactions.forEach((trx) => {
+                                          const mId = trx.member?.id || (trx as any).member_id || `anon_${trx.id}`;
+                                          if (!memberTrxMap[mId]) {
+                                            memberTrxMap[mId] = [];
+                                          }
+                                          memberTrxMap[mId].push(trx);
                                         });
+
+                                        // For each member, determine their latest status:
+                                        // If member has both paid and pending due -> Partially Paid (use pending due for action)
+                                        // If latest is paid -> Paid
+                                        // If latest is pending with a new slip -> Slip Received
+                                        // If latest is empty pending due, but prior submission was rejected -> Rejected
+                                        // Otherwise -> latest (Pending Due)
+                                        const currentTransactions = Object.values(memberTrxMap).map((mTrxList) => {
+                                          const sorted = [...mTrxList].sort((a, b) => {
+                                            const dateA = a.created_at || a.updated_at || a.transaction_date || '';
+                                            const dateB = b.created_at || b.updated_at || b.transaction_date || '';
+                                            return dateB.localeCompare(dateA) || (b.id || 0) - (a.id || 0);
+                                          });
+
+                                          const hasPaid = mTrxList.some((t) => t.status === 'paid');
+                                          const pendingTrx = mTrxList.find((t) => t.status === 'pending');
+
+                                          if (hasPaid && pendingTrx) {
+                                            const totalPaidPortion = mTrxList
+                                              .filter((t) => t.status === 'paid')
+                                              .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+                                            const totalPendingPortion = mTrxList
+                                              .filter((t) => t.status === 'pending')
+                                              .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+
+                                            return {
+                                              ...pendingTrx,
+                                              isPartialPayment: true,
+                                              paidAmountSummary: totalPaidPortion,
+                                              totalAssignedAmount: totalPaidPortion + totalPendingPortion,
+                                            } as any;
+                                          }
+
+                                          const latest = sorted[0];
+
+                                          if (latest.status === 'pending' && !latest.receipt_photo) {
+                                            const lastRejected = sorted.find((t) => t.status === 'rejected' || !!t.rejection_reason);
+                                            if (lastRejected) {
+                                              return lastRejected;
+                                            }
+                                          }
+
+                                          return latest;
+                                        }).sort((a, b) =>
+                                          (a.member?.name || '').localeCompare(b.member?.name || '')
+                                        );
 
                                         return currentTransactions.map((trx: any) => {
                                           const isPartial = trx.isPartialPayment || trx.status === 'partial' || trx.status === 'partially_paid';
@@ -1141,7 +1066,7 @@ export default function AdminTransactionsPage() {
                                                 )}
                                               </TableCell>
                                               
-                                              {/* Receipt Photo & Member Proof Column in Details (View-only for Admins) */}
+                                              {/* Receipt Photo & Member Proof Column */}
                                               <TableCell className="p-3 align-middle text-center">
                                                 {trx.receipt_photo ? (
                                                   <div className="flex flex-col items-center justify-center gap-1">
@@ -1151,7 +1076,6 @@ export default function AdminTransactionsPage() {
                                                       date={trx.receipt_photo_uploaded_at ? `Uploaded: ${trx.receipt_photo_uploaded_at}` : undefined}
                                                       isRejected={isRejected}
                                                       isPartial={isPartial}
-                                                      isSlipReceived={isSlipReceived}
                                                       rejectionReason={trx.rejection_reason}
                                                       onClick={() => viewReceiptPhoto(
                                                         trx.receipt_photo!,
@@ -1243,12 +1167,9 @@ export default function AdminTransactionsPage() {
         </div>
       )}
 
-      {/* =========================================================================
-          VIEW 2: MEMBERS PAYMENT STATUS (PENDING & COMPLETE MATRIX)
-          ========================================================================= */}
+      {/* VIEW 2: MEMBERS PAYMENT STATUS MATRIX */}
       {activeTab === 'members_status' && (
         <div className="space-y-5">
-          {/* Top 4 Summary Metrics Cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <Card className="border-slate-200 shadow-2xs bg-white">
               <CardHeader className="p-4 pb-1">
@@ -1311,7 +1232,6 @@ export default function AdminTransactionsPage() {
             </Card>
           </div>
 
-          {/* Filter and Search Bar */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
             <div className="flex items-center gap-1.5 flex-wrap">
               <button
@@ -1375,7 +1295,6 @@ export default function AdminTransactionsPage() {
             </div>
           </div>
 
-          {/* Members List Matrix */}
           <div className="space-y-3">
             {loadingUsers || loadingAllTrx ? (
               <div className="text-center py-12 text-slate-500 bg-white rounded-xl border border-slate-200">
@@ -1397,9 +1316,7 @@ export default function AdminTransactionsPage() {
                       hasPending ? 'border-amber-200 hover:border-amber-300' : 'border-slate-200 hover:border-emerald-200'
                     }`}
                   >
-                    {/* Member Summary Header Row */}
                     <div className="p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                      {/* Left: Member Identity */}
                       <div className="flex items-center gap-3.5 min-w-[280px]">
                         <div className={`w-11 h-11 rounded-xl flex items-center justify-center font-bold text-sm shadow-inner ${
                           hasPending
@@ -1473,7 +1390,6 @@ export default function AdminTransactionsPage() {
                         </div>
                       </div>
 
-                      {/* Middle: Progress and Amounts */}
                       <div className="flex-1 max-w-md space-y-1.5">
                         <div className="flex items-center justify-between text-xs font-semibold">
                           <span className="text-emerald-700">Paid: BDT {totalPaidAmount.toLocaleString()}</span>
@@ -1484,7 +1400,6 @@ export default function AdminTransactionsPage() {
                           )}
                         </div>
 
-                        {/* Progress Bar Line */}
                         <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden flex">
                           <div
                             className="bg-emerald-600 h-full transition-all duration-300"
@@ -1502,7 +1417,6 @@ export default function AdminTransactionsPage() {
                         </div>
                       </div>
 
-                      {/* Right: Actions */}
                       <div className="flex items-center gap-2 shrink-0">
                         <Button
                           size="sm"
@@ -1523,10 +1437,8 @@ export default function AdminTransactionsPage() {
                       </div>
                     </div>
 
-                    {/* Expandable Breakdown Drawer */}
                     {isExpanded && (
                       <div className="border-t border-slate-100 bg-slate-50/60 p-4 space-y-4">
-                        {/* Section A: Pending Dues (if any) */}
                         {pendingTransactions.length > 0 && (
                           <div className="space-y-2">
                             <h4 className="text-xs font-bold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
@@ -1566,7 +1478,6 @@ export default function AdminTransactionsPage() {
                                       <span className="font-mono text-[10px] text-slate-400">{pt.transaction_no}</span>
                                     </div>
 
-                                    {/* Uploaded Receipt Photo in Pending Card (View-only for Admins) */}
                                     <div className="mt-2.5 pt-2 border-t border-slate-100 flex flex-col gap-1.5">
                                       {pt.receipt_photo ? (
                                         <>
@@ -1577,7 +1488,6 @@ export default function AdminTransactionsPage() {
                                               date={pt.receipt_photo_uploaded_at ? `Uploaded: ${pt.receipt_photo_uploaded_at}` : undefined}
                                               isRejected={pt.status === 'rejected'}
                                               isPartial={Boolean(isRemainingDue)}
-                                              isSlipReceived={!isRemainingDue && pt.status === 'pending' && !!pt.receipt_photo}
                                               rejectionReason={pt.rejection_reason}
                                               onClick={() => viewReceiptPhoto(pt.receipt_photo!, `${member.name} - ${pt.month || pt.description || 'Receipt Slip'}`, pt.receipt_photo_uploaded_at, pt.status === 'rejected', pt.rejection_reason)}
                                             />
@@ -1591,7 +1501,7 @@ export default function AdminTransactionsPage() {
                                             <div className="text-[10px] text-slate-600 bg-slate-50 p-1.5 rounded border border-slate-200">
                                               {pt.member_payment_method && (
                                                 <span className="font-semibold capitalize text-emerald-900">
-                                                  {pt.member_payment_method.replace(/_/g, ' ')}
+                                                  {pt.member_payment_method.replace(/_/g, ' ') || 'mobile_banking'}
                                                 </span>
                                               )}
                                               {pt.member_trx_reference && (
@@ -1725,7 +1635,6 @@ export default function AdminTransactionsPage() {
                           </div>
                         )}
 
-                        {/* Section B: Completed Transactions History */}
                         <div className="space-y-2">
                           <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
                             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
@@ -1739,36 +1648,24 @@ export default function AdminTransactionsPage() {
                               <Table className="table-fixed w-full min-w-[750px]">
                                 <TableHeader className="bg-slate-50">
                                   <TableRow className="text-xs">
-                                    <TableHead className="w-[18%] text-center font-semibold text-slate-700">Receipt / Trx No</TableHead>
-                                    <TableHead className="w-[20%] text-center font-semibold text-slate-700">Month / Description</TableHead>
-                                    <TableHead className="w-[13%] text-center font-semibold text-slate-700">Amount</TableHead>
-                                    <TableHead className="w-[14%] text-center font-semibold text-slate-700">Receipt Photo / Slip</TableHead>
-                                    <TableHead className="w-[12%] text-center font-semibold text-slate-700">Status</TableHead>
-                                    <TableHead className="w-[11%] text-center font-semibold text-slate-700">Payment Date</TableHead>
-                                    <TableHead className="w-[12%] text-center font-semibold text-slate-700">Action</TableHead>
+                                    <TableHead className="w-[18%] text-center font-semibold text-slate-700">Transaction No</TableHead>
+                                    <TableHead className="w-[22%] text-center font-semibold text-slate-700">Month / Description</TableHead>
+                                    <TableHead className="w-[15%] text-center font-semibold text-slate-700">Amount</TableHead>
+                                    <TableHead className="w-[15%] text-center font-semibold text-slate-700">Receipt Photo / Slip</TableHead>
+                                    <TableHead className="w-[15%] text-center font-semibold text-slate-700">Status</TableHead>
+                                    <TableHead className="w-[15%] text-center font-semibold text-slate-700">Payment Date</TableHead>
                                   </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                  {paidTransactions.map((paid: any) => {
+                                  {paidTransactions.map((paid) => {
                                     const isPartialPaid = (paid.description && /partial payment/i.test(paid.description)) || (paid.description && /remaining due/i.test(paid.description));
-                                    const linkedReceipt = paid.receipt;
 
                                     return (
                                       <TableRow key={paid.id} className="text-xs">
-                                        <TableCell className="p-3 align-middle text-center font-mono font-medium text-slate-600">
-                                          {linkedReceipt ? (
-                                            <div className="flex flex-col items-center">
-                                              <span className="font-bold text-emerald-900">{linkedReceipt.receipt_no}</span>
-                                              <span className="text-[10px] text-slate-400">Trx: {paid.transaction_no}</span>
-                                            </div>
-                                          ) : (
-                                            paid.transaction_no
-                                          )}
-                                        </TableCell>
+                                        <TableCell className="p-3 align-middle text-center font-mono font-medium text-slate-600">{paid.transaction_no}</TableCell>
                                         <TableCell className="p-3 align-middle text-center font-medium text-slate-800">{paid.month || paid.description || paid.type}</TableCell>
                                         <TableCell className="p-3 align-middle text-center font-bold text-slate-900">BDT {Number(paid.amount).toLocaleString()}</TableCell>
                                         
-                                        {/* Receipt Photo in History (View-only for Admins) */}
                                         <TableCell className="p-3 align-middle text-center">
                                           {paid.receipt_photo ? (
                                             <div className="flex justify-center">
@@ -1810,18 +1707,6 @@ export default function AdminTransactionsPage() {
                                           </div>
                                         </TableCell>
                                         <TableCell className="p-3 align-middle text-center text-slate-500">{paid.transaction_date}</TableCell>
-                                        
-                                        <TableCell className="p-3 align-middle text-center">
-                                          <Button
-                                            size="sm"
-                                            variant="outline"
-                                            onClick={() => handlePrint(linkedReceipt, paid)}
-                                            className="h-7 px-2 text-xs border-emerald-300 text-emerald-800 hover:bg-emerald-50 cursor-pointer shadow-2xs font-bold"
-                                            title="Print official society receipt"
-                                          >
-                                            <Printer className="h-3 w-3 mr-1" /> Print
-                                          </Button>
-                                        </TableCell>
                                       </TableRow>
                                     );
                                   })}
@@ -1840,9 +1725,7 @@ export default function AdminTransactionsPage() {
         </div>
       )}
 
-      {/* =========================================================================
-          DIALOG: COLLECT PAYMENT (PARTIAL OR FULL WITH REMAINING DUE CALCULATION)
-          ========================================================================= */}
+      {/* DIALOG: COLLECT PAYMENT */}
       <Dialog open={openCollect} onOpenChange={setOpenCollect}>
         <DialogContent className={collectingTrx?.receipt_photo ? "w-[96vw] max-w-6xl xl:max-w-7xl max-h-[95vh] overflow-y-auto p-5 sm:p-6" : "max-w-lg"}>
           <DialogHeader>
@@ -1854,8 +1737,6 @@ export default function AdminTransactionsPage() {
 
           {collectingTrx && (
             <div className={collectingTrx.receipt_photo ? "grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch pt-2" : "pt-1"}>
-              
-              {/* LEFT SIDE: Full Image Slip Preview with 2.5x Magnifier */}
               {collectingTrx.receipt_photo && (
                 <div className="lg:col-span-6 flex flex-col justify-between bg-slate-950 border border-slate-800 rounded-2xl p-4 shadow-inner text-white min-h-[500px] h-full">
                   <div className="flex items-center justify-between pb-2.5 border-b border-slate-800 text-xs">
@@ -1905,10 +1786,8 @@ export default function AdminTransactionsPage() {
                 </div>
               )}
 
-              {/* RIGHT SIDE: Payment Info & Settlement Form */}
               <div className={collectingTrx.receipt_photo ? "lg:col-span-6 flex flex-col justify-between" : ""}>
                 <form onSubmit={onConfirmCollection} className="space-y-3.5">
-                  {/* Member and Fee Information Card */}
                   <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
                     <div className="flex items-center justify-between text-xs">
                       <div>
@@ -1935,7 +1814,6 @@ export default function AdminTransactionsPage() {
                     </div>
                   </div>
 
-                  {/* Member Proof Submission Banner (Auto-filled for Admin Review) */}
                   {(collectingTrx.receipt_photo || collectingTrx.member_paid_amount || collectingTrx.member_trx_reference || collectingTrx.member_comment) && (
                     <div className="p-3 bg-emerald-50/90 border border-emerald-300 rounded-xl space-y-1.5 text-xs shadow-2xs">
                       <div className="flex items-center justify-between font-bold text-emerald-950">
@@ -1962,7 +1840,6 @@ export default function AdminTransactionsPage() {
                     </div>
                   )}
 
-                  {/* Paid Amount Input Field */}
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <Label className="font-bold text-slate-900 text-xs flex items-center gap-1">
@@ -2002,7 +1879,6 @@ export default function AdminTransactionsPage() {
                     />
                   </div>
 
-                  {/* Live Remaining Due Calculation Display */}
                   <div className={`p-3 rounded-xl border transition-all ${
                     isFullSettlement
                       ? 'bg-emerald-50 border-emerald-300'
@@ -2037,7 +1913,6 @@ export default function AdminTransactionsPage() {
                     )}
                   </div>
 
-                  {/* Payment Method & Date */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <Label className="text-xs font-bold text-slate-900">Payment Method</Label>
@@ -2065,7 +1940,6 @@ export default function AdminTransactionsPage() {
                     </div>
                   </div>
 
-                  {/* Optional Notes */}
                   <div>
                     <Label className="text-xs text-slate-600">Payment Notes / Reference (Optional)</Label>
                     <Input
@@ -2076,7 +1950,6 @@ export default function AdminTransactionsPage() {
                     />
                   </div>
 
-                  {/* Receipt Generation Toggle */}
                   <label className="flex items-center gap-2 cursor-pointer select-none bg-slate-50 p-2.5 rounded-lg border border-slate-200">
                     <input
                       type="checkbox"
@@ -2121,9 +1994,7 @@ export default function AdminTransactionsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* =========================================================================
-          DIALOG: REJECT PAYMENT PROOF SLIP (ADMIN ONLY)
-          ========================================================================= */}
+      {/* DIALOG: REJECT PAYMENT PROOF SLIP */}
       <Dialog open={openRejectModal} onOpenChange={setOpenRejectModal}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
@@ -2160,7 +2031,6 @@ export default function AdminTransactionsPage() {
                 </div>
               </div>
 
-              {/* Quick Preset Rejection Reasons */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-bold text-slate-700">Quick Select Reason</Label>
                 <div className="flex flex-wrap gap-1.5">
@@ -2201,7 +2071,6 @@ export default function AdminTransactionsPage() {
                 />
               </div>
 
-              {/* Explicit Confirmation Warning Box */}
               <div className="p-3 bg-red-100/90 border border-red-300 rounded-xl text-red-950 text-xs flex items-start gap-2.5 shadow-2xs">
                 <AlertCircle className="h-4 w-4 text-red-700 shrink-0 mt-0.5" />
                 <div className="space-y-0.5">
@@ -2234,9 +2103,7 @@ export default function AdminTransactionsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* =========================================================================
-          DIALOG 1: CREATE / ASSIGN PAYMENT DEMAND (SUPER ADMIN & ADMIN)
-          ========================================================================= */}
+      {/* DIALOG 1: CREATE / ASSIGN PAYMENT DEMAND */}
       <Dialog open={openDemand} onOpenChange={setOpenDemand}>
         <DialogContent className="max-w-xl max-h-[92vh] overflow-y-auto">
           <DialogHeader>
@@ -2247,7 +2114,6 @@ export default function AdminTransactionsPage() {
           </DialogHeader>
 
           <form onSubmit={onSubmitDemand} className="space-y-4 pt-2">
-            {/* Category Selector: Monthly vs One-Time */}
             <div className="grid grid-cols-2 gap-3 p-1.5 bg-slate-100 rounded-lg">
               <button
                 type="button"
@@ -2276,7 +2142,6 @@ export default function AdminTransactionsPage() {
               </button>
             </div>
 
-            {/* Target Members Selection */}
             <div className="space-y-2 p-3.5 bg-slate-50 border border-slate-200 rounded-lg">
               <Label className="font-bold text-slate-900 text-xs">Assign To Which Member(s)?</Label>
               <div className="space-y-2">
@@ -2325,7 +2190,6 @@ export default function AdminTransactionsPage() {
               </div>
             </div>
 
-            {/* MONTHLY PAYMENT: Month Selector Grid */}
             {demandCategory === 'monthly_payment' && (
               <div className="space-y-2.5 p-3.5 bg-slate-50 border border-slate-200 rounded-lg">
                 <div className="flex items-center justify-between">
@@ -2390,7 +2254,6 @@ export default function AdminTransactionsPage() {
               </div>
             )}
 
-            {/* ONE-TIME PAYMENT: Title / Purpose */}
             {demandCategory === 'one_time' && (
               <div className="space-y-1.5 p-3.5 bg-slate-50 border border-slate-200 rounded-lg">
                 <Label className="font-bold text-slate-900 text-xs">Payment Title / Purpose</Label>
@@ -2404,7 +2267,6 @@ export default function AdminTransactionsPage() {
               </div>
             )}
 
-            {/* Amount and Due Date */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <Label className="font-bold text-slate-900 text-xs">
@@ -2434,7 +2296,6 @@ export default function AdminTransactionsPage() {
               </div>
             </div>
 
-            {/* Optional Description */}
             <div>
               <Label className="text-xs text-slate-600">Additional Instructions / Notes (Optional)</Label>
               <Input
@@ -2461,9 +2322,7 @@ export default function AdminTransactionsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* =========================================================================
-          DIALOG 2: MANUAL RECORD TRANSACTION
-          ========================================================================= */}
+      {/* DIALOG 2: MANUAL RECORD TRANSACTION */}
       <Dialog open={openSingle} onOpenChange={setOpenSingle}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -2543,7 +2402,6 @@ export default function AdminTransactionsPage() {
           </DialogHeader>
 
           <div className="space-y-3 pt-1">
-            {/* Prominent Red Banner Explaining Why Rejected */}
             {photoModalIsRejected && (
               <div className="p-3.5 bg-red-50 border border-red-300 rounded-xl space-y-1.5 text-xs shadow-2xs">
                 <div className="flex items-center gap-2 font-bold text-red-950 text-sm">
@@ -2592,11 +2450,6 @@ export default function AdminTransactionsPage() {
           </div>
         </DialogContent>
       </Dialog>
-
-      {/* Hidden print container for official society receipt */}
-      {printReceipt && (
-        <ReceiptPrintArea receipt={printReceipt} />
-      )}
     </div>
   );
 }

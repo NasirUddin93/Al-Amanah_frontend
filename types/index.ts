@@ -38,7 +38,7 @@ export interface Transaction {
   type: string;
   payment_category?: string;
   amount: number;
-  status?: 'pending' | 'paid' | 'cancelled' | string;
+  status?: 'pending' | 'paid' | 'rejected' | 'cancelled' | string;
   month?: string;
   transaction_date: string;
   description?: string;
@@ -49,6 +49,11 @@ export interface Transaction {
   receipt?: Receipt;
   receipt_photo?: string;
   receipt_photo_uploaded_at?: string;
+  member_paid_amount?: number;
+  member_trx_reference?: string;
+  member_payment_method?: string;
+  member_comment?: string;
+  rejection_reason?: string;
   created_at: string;
   updated_at?: string;
 }
@@ -60,9 +65,25 @@ export interface TransactionList {
 }
 
 export interface Receipt {
-  id: number; receipt_no: string; amount: number; payment_method: string; receipt_date: string;
-  member?: { id: number; name: string; member_no?: string };
-  transaction?: { id: number; transaction_no: string };
+  id: number;
+  receipt_no: string;
+  amount: number;
+  payment_method: string;
+  receipt_date: string;
+  member?: { id: number; name: string; member_no?: string; email?: string; phone?: string };
+  transaction?: {
+    id: number;
+    transaction_no: string;
+    description?: string;
+    month?: string;
+    receipt_photo?: string;
+    receipt_photo_uploaded_at?: string;
+    member_paid_amount?: number;
+    member_trx_reference?: string;
+    member_payment_method?: string;
+  };
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface MeetingExpense {
