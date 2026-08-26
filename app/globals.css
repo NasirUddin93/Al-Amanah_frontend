@@ -241,10 +241,57 @@ footer ul { list-style: none; display: grid; gap: 8px; }
 .foot-bottom { border-top: 1px solid rgba(255,255,255,.12); padding: 18px 0; font-size: 13px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 
 @media print {
-  .nav, .topbar, footer, .no-print, aside { display: none !important; }
-  body { background: #fff !important; }
-  @page { size: A4; margin: 12mm; }
-  .doc-sheet { box-shadow: none; border-color: #999; }
+  /* Hide all website/app UI chrome when printing */
+  html, body {
+    background: #fff !important;
+    color: #000 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Hide app navigation, sidebars, headers, cards, tables, footers, buttons, and dialogs */
+  aside,
+  nav,
+  header,
+  footer,
+  .nav,
+  .topbar,
+  .no-print,
+  .print\:hidden,
+  button,
+  [role="dialog"],
+  .fixed,
+  main > div:not(.print\:block) {
+    display: none !important;
+  }
+
+  /* Ensure main takes full page */
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    display: block !important;
+  }
+
+  /* Display printable receipt cleanly */
+  .print\:block {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 auto !important;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 15mm;
+  }
+
+  .doc-sheet {
+    box-shadow: none !important;
+    border-color: #999 !important;
+  }
 }
 
 @media(max-width:1020px) {

@@ -16,6 +16,9 @@ const baseQuery = fetchBaseQuery({
 export const api = createApi({
   reducerPath: 'api',
   baseQuery,
+  refetchOnFocus: true,
+  refetchOnReconnect: true,
+  refetchOnMountOrArgChange: true,
   tagTypes: ['Users', 'Roles', 'Permissions', 'Transactions', 'Receipts', 'MeetingExpenses', 'Fdrs',
              'Notifications', 'Settings', 'AdminPermissions', 'ProfileShares', 'ActivityLogs'],
   endpoints: (builder) => ({
@@ -158,14 +161,22 @@ export const api = createApi({
         method: 'POST',
         body,
       }),
-      invalidatesTags: ['Transactions', 'Receipts'],
+      invalidatesTags: ['Transactions', 'Receipts', 'Notifications'],
+    }),
+    rejectReceiptPhoto: builder.mutation<{ message: string; transaction: T.Transaction }, { id: number; body?: { reason?: string } }>({
+      query: ({ id, body }) => ({
+        url: `/transactions/${id}/reject-receipt-photo`,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Transactions', 'Receipts', 'Notifications'],
     }),
     getReport: builder.query<T.TransactionList, { from?: string; to?: string; type?: string; page?: number; per_page?: number } | void>({
       query: (params) => ({ url: '/reports/transactions', params: params || undefined }),
     }),
 
     /* ---------- Receipts ---------- */
-    getReceipts: builder.query<T.Paginated<T.Receipt>, { page?: number } | void>({
+    getReceipts: builder.query<T.Paginated<T.Receipt>, { page?: number; per_page?: number } | void>({
       query: (params) => ({ url: '/receipts', params: params || undefined }),
       providesTags: ['Receipts'],
     }),
@@ -268,6 +279,7 @@ export const {
   useGetTransactionsQuery, useCreateTransactionMutation, useUpdateTransactionMutation,
   useCollectPaymentMutation,
   useUploadReceiptPhotoMutation,
+  useRejectReceiptPhotoMutation,
   useDeleteTransactionMutation, useGeneratePaymentsMutation, useGetReportQuery,
   useGetReceiptsQuery, useCreateReceiptMutation, useUpdateReceiptMutation, useDeleteReceiptMutation,
   useGetMeetingExpensesQuery, useCreateMeetingExpenseMutation, useDeleteMeetingExpenseMutation,

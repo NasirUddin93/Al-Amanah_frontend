@@ -21,11 +21,23 @@ export default function LoginPage() {
     resolver: zodResolver(loginSchema),
   });
 
+  const routeUserByRole = (userObj: any) => {
+    const unwrapped = userObj?.data || userObj;
+    const roleName = typeof unwrapped?.role === 'string' ? unwrapped.role : unwrapped?.role?.name || unwrapped?.role?.data?.name;
+    if (roleName === 'member') {
+      router.push('/member');
+    } else if (roleName === 'accountant') {
+      router.push('/accounts');
+    } else {
+      router.push('/admin');
+    }
+  };
+
   const onSubmit = async (values: LoginValues) => {
     try {
       const res = await login(values).unwrap();
       dispatch(setCredentials(res));
-      router.push('/dashboard');
+      routeUserByRole(res.user);
     } catch { /* error shown below */ }
   };
 
@@ -38,7 +50,7 @@ export default function LoginPage() {
         password: 'password',
       }).unwrap();
       dispatch(setCredentials(res));
-      router.push('/dashboard');
+      routeUserByRole(res.user);
     } catch {}
   };
 

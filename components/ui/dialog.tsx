@@ -10,12 +10,16 @@ interface DialogProps {
 export function Dialog({ open, onOpenChange, children }: DialogProps) {
   if (!open) return null
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
       <div
-        className="fixed inset-0 bg-black/50 backdrop-blur-xs transition-opacity"
+        className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
         onClick={() => onOpenChange(false)}
       />
-      <div className="relative z-50 w-full max-w-lg">{children}</div>
+      <div className="relative z-50 flex items-center justify-center w-full pointer-events-none my-auto">
+        <div className="pointer-events-auto w-full flex items-center justify-center">
+          {children}
+        </div>
+      </div>
     </div>
   )
 }
@@ -25,7 +29,7 @@ export const DialogContent = React.forwardRef<HTMLDivElement, React.HTMLAttribut
     <div
       ref={ref}
       className={cn(
-        "relative w-full rounded-xl bg-white p-6 shadow-lg border border-slate-200",
+        "relative w-full max-w-lg rounded-xl bg-white p-6 shadow-2xl border border-slate-200 m-auto",
         className
       )}
       {...props}
