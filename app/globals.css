@@ -285,12 +285,27 @@ footer ul { list-style: none; display: grid; gap: 8px; }
 
   @page {
     size: A4 portrait;
-    margin: 15mm;
+    margin: 12mm;
   }
 
   .doc-sheet {
     box-shadow: none !important;
     border-color: #999 !important;
+  }
+
+  /* Table and section page break behavior */
+  table, .print-table, .print-month-card, .print-avoid-break {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  thead {
+    display: table-header-group !important;
+  }
+
+  tr, .print-row {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 }
 

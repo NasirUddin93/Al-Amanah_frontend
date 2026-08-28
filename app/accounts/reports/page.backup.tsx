@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
-import Link from 'next/link';
 import { RoleGate } from '@/components/role-gate';
 import {
   useGetReceiptsQuery,
@@ -34,9 +33,7 @@ import {
   Clock,
   Wallet,
   FileCheck,
-  Eye,
 } from 'lucide-react';
-import { ReportPrintArea, type PrintSection, type PrintingReportData } from '@/components/report-print';
 
 interface MemberReceiptItem {
   id: string | number;
@@ -96,6 +93,29 @@ interface MemberGroup {
   pureDuePendingCount: number;
   rejectedCount: number;
   currentState?: 'cleared' | 'partial' | 'received' | 'due' | 'rejected';
+}
+
+interface PrintSection {
+  memberHeader: string;
+  memberSubHeader?: string;
+  monthSections: {
+    monthTitle: string;
+    campaignTrxNo?: string;
+    subTotalPaid: number;
+    subTotalDue: number;
+    rows: {
+      serial: string | number;
+      date: string;
+      description: string;
+      transactionNo: string;
+      refNo: string;
+      status: string;
+      paidAmount: number;
+      dueAmount: number;
+    }[];
+  }[];
+  memberTotalPaid: number;
+  memberTotalDue: number;
 }
 
 const MONTH_MAP: Record<string, { num: string; name: string }> = {
@@ -188,9 +208,9 @@ function extractInputtedReference(trx?: any, receipt?: any): string {
   return '-';
 }
 
-export default function AdminReportsPage() {
+export default function AccountsReportsPage() {
   return (
-    <RoleGate roles={['super_admin', 'admin']}>
+    <RoleGate roles={['super_admin', 'admin', 'accountant']}>
       <ReportHierarchyManagerContent />
     </RoleGate>
   );
@@ -204,8 +224,27 @@ function ReportHierarchyManagerContent() {
   const [expandedMembers, setExpandedMembers] = useState<Record<string | number, boolean>>({});
   const [expandedMonths, setExpandedMonths] = useState<Record<string, boolean>>({});
 
-  // Printable Report State with Nested Member & Month Section structure
-  const [printingReport, setPrintingReport] = useState<PrintingReportData | null>(null);
+  const [printingReport, setPrintingReport] = useState<{
+    level: 1 | 2 | 3;
+    title: string;
+    subtitle?: string;
+    date: string;
+    meta?: Record<string, string | number>;
+    summaryStats?: {
+      totalDemand: number;
+      totalPaid: number;
+      totalDue: number;
+      recoveryRate: number;
+      totalMembers: number;
+      totalRecords: number;
+      paidCount?: number;
+      dueCount?: number;
+    };
+    sections: PrintSection[];
+    grandTotalPaid: number;
+    grandTotalDue: number;
+    totalRecords: number;
+  } | null>(null);
 
   const { data: receiptsData } = useGetReceiptsQuery({ per_page: 3000 }, { pollingInterval: 5000 });
   const { data: transactionsData } = useGetTransactionsQuery({ per_page: 3000 }, { pollingInterval: 5000 });
@@ -706,101 +745,34 @@ function ReportHierarchyManagerContent() {
   }, [rawReceipts, rawTransactions, hierarchyData]);
 
   const filteredHierarchy = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-
-    return hierarchyData
-      .map((member) => {
+    return hierarchyData.filter((member) => {
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
         const nameMatch = member.memberName.toLowerCase().includes(q);
         const idMatch = member.memberNo.toLowerCase().includes(q);
-        const emailMatch = (member.memberEmail || '').toLowerCase().includes(q);
-        const phoneMatch = (member.memberPhone || '').toLowerCase().includes(q);
-        const memberInfoMatches = Boolean(q && (nameMatch || idMatch || emailMatch || phoneMatch));
+        const hasMatchingTxn = member.items.some(
+          (it) =>
+            it.receiptNo?.toLowerCase().includes(q) ||
+            it.transactionNo?.toLowerCase().includes(q) ||
+            it.inputtedReference?.toLowerCase().includes(q) ||
+            it.monthOrDesc?.toLowerCase().includes(q)
+        );
+        if (!nameMatch && !idMatch && !hasMatchingTxn) return false;
+      }
 
-        // Filter monthGroups and their items
-        const filteredMonthGroups: MonthGroup[] = member.monthGroups
-          .map((mg) => {
-            const filteredItems = mg.items.filter((it) => {
-              // 1. Status filter
-              if (statusFilter === 'paid' && it.status !== 'paid') return false;
-              if (statusFilter === 'partial' && it.status !== 'partial' && !it.isPartial) return false;
-              if (statusFilter === 'received_slip' && (!it.receiptPhoto || it.status === 'paid' || it.status === 'rejected')) return false;
-              if (statusFilter === 'pending' && (it.status === 'paid' || it.status === 'rejected')) return false;
-              if (statusFilter === 'rejected' && it.status !== 'rejected' && !it.isRejected) return false;
+      if (statusFilter === 'paid' && member.currentState !== 'cleared') return false;
+      if (statusFilter === 'partial' && member.currentState !== 'partial') return false;
+      if (statusFilter === 'received_slip' && member.currentState !== 'received') return false;
+      if (statusFilter === 'pending' && member.currentState !== 'due') return false;
+      if (statusFilter === 'rejected' && member.currentState !== 'rejected') return false;
 
-              // 2. Payment method filter
-              if (paymentMethodFilter !== 'all') {
-                const method = (it.paymentMethod || 'cash').toLowerCase();
-                if (paymentMethodFilter === 'cash' && !method.includes('cash')) return false;
-                if (paymentMethodFilter === 'bank' && !method.includes('bank') && !method.includes('ibbl') && !method.includes('brac')) return false;
-                if (paymentMethodFilter === 'mobile_banking' && !method.includes('bkash') && !method.includes('nagad') && !method.includes('rocket') && !method.includes('mobile')) return false;
-              }
+      if (paymentMethodFilter !== 'all') {
+        const hasMethod = member.items.some((it) => it.paymentMethod.includes(paymentMethodFilter));
+        if (!hasMethod) return false;
+      }
 
-              // 3. Search query filter
-              if (q && !memberInfoMatches) {
-                const trxMatch = it.transactionNo.toLowerCase().includes(q);
-                const rctMatch = (it.receiptNo || '').toLowerCase().includes(q);
-                const refMatch = (it.inputtedReference || '').toLowerCase().includes(q);
-                const descMatch = it.monthOrDesc.toLowerCase().includes(q);
-                if (!trxMatch && !rctMatch && !refMatch && !descMatch) return false;
-              }
-
-              return true;
-            });
-
-            if (filteredItems.length === 0) return null;
-
-            const subTotalPaid = filteredItems
-              .filter((it) => it.status === 'paid' || it.status === 'partial')
-              .reduce((sum, it) => sum + (it.status === 'paid' ? it.amount : (it.memberPaidAmount || it.amount)), 0);
-
-            const subTotalDue = filteredItems
-              .filter((it) => it.status !== 'paid' && it.status !== 'rejected')
-              .reduce((sum, it) => sum + it.amount, 0);
-
-            return {
-              ...mg,
-              items: filteredItems,
-              totalCount: filteredItems.length,
-              totalPaid: subTotalPaid,
-              totalDue: subTotalDue,
-              netAmount: subTotalPaid + subTotalDue,
-            };
-          })
-          .filter((mg): mg is MonthGroup => mg !== null);
-
-        // If member has filtered monthGroups with matching items
-        if (filteredMonthGroups.length > 0) {
-          const totalPaid = filteredMonthGroups.reduce((s, mg) => s + mg.totalPaid, 0);
-          const totalDue = filteredMonthGroups.reduce((s, mg) => s + mg.totalDue, 0);
-          const allFilteredItems = filteredMonthGroups.flatMap((mg) => mg.items);
-
-          return {
-            ...member,
-            items: allFilteredItems,
-            monthGroups: filteredMonthGroups,
-            totalCount: allFilteredItems.length,
-            totalPaid,
-            totalDue,
-            netAmount: totalPaid + totalDue,
-          };
-        }
-
-        // If statusFilter is 'all' and search query directly matched the member's name/folio, keep member
-        if (statusFilter === 'all' && memberInfoMatches) {
-          return {
-            ...member,
-            items: [],
-            monthGroups: [],
-            totalCount: 0,
-            totalPaid: 0,
-            totalDue: 0,
-            netAmount: 0,
-          };
-        }
-
-        return null;
-      })
-      .filter((m): m is MemberGroup => m !== null);
+      return true;
+    });
   }, [hierarchyData, searchQuery, statusFilter, paymentMethodFilter]);
 
   const toggleMemberExpand = (memberId: string | number) => {
@@ -833,7 +805,6 @@ function ReportHierarchyManagerContent() {
   // PRINT HANDLERS: 3 LEVELS (Separated by Big Member Header & 2nd Big Month Header)
   // =========================================================================
 
-  // LEVEL 1: Print Entire Report (Grouped by Member Title -> Month 2nd Title -> Data Table)
   const handlePrintEntireReport = () => {
     const sections: PrintSection[] = [];
     let grandTotalPaid = 0;
@@ -845,12 +816,10 @@ function ReportHierarchyManagerContent() {
 
     filteredHierarchy.forEach((m) => {
       const monthSections: PrintSection['monthSections'] = [];
-      let memberTotalAssessed = 0;
       let memberTotalPaid = 0;
       let memberTotalDue = 0;
 
       m.monthGroups.forEach((mg) => {
-        let subTotalAssessed = 0;
         let subTotalPaid = 0;
         let subTotalDue = 0;
 
@@ -858,15 +827,12 @@ function ReportHierarchyManagerContent() {
           const isPaid = it.status === 'paid';
           const paidAmt = isPaid ? it.amount : 0;
           const dueAmt = !isPaid && it.status !== 'rejected' ? it.amount : 0;
-          const assessedAmt = paidAmt + dueAmt;
 
           if (isPaid) paidCount++;
           else if (it.status !== 'rejected') dueCount++;
 
-          subTotalAssessed += assessedAmt;
           subTotalPaid += paidAmt;
           subTotalDue += dueAmt;
-          memberTotalAssessed += assessedAmt;
           memberTotalPaid += paidAmt;
           memberTotalDue += dueAmt;
           grandTotalPaid += paidAmt;
@@ -880,39 +846,27 @@ function ReportHierarchyManagerContent() {
             transactionNo: it.transactionNo || it.receiptNo || '-',
             refNo: it.inputtedReference || '-',
             status: it.isPartial ? 'Partially Paid' : it.status === 'paid' ? 'Paid' : it.status === 'rejected' ? 'Rejected' : 'Due',
-            assessedAmount: assessedAmt,
             paidAmount: paidAmt,
             dueAmount: dueAmt,
-            balanceAmount: dueAmt,
           };
         });
 
-        if (rows.length > 0) {
-          monthSections.push({
-            monthTitle: mg.monthLabel,
-            campaignTrxNo: mg.campaignTrxNo,
-            subTotalAssessed,
-            subTotalPaid,
-            subTotalDue,
-            rows,
-          });
-        }
+        monthSections.push({
+          monthTitle: mg.monthLabel,
+          campaignTrxNo: mg.campaignTrxNo,
+          subTotalPaid,
+          subTotalDue,
+          rows,
+        });
       });
 
-      if (monthSections.length > 0) {
-        sections.push({
-          memberId: m.memberId,
-          memberName: m.memberName,
-          memberNo: m.memberNo,
-          memberRole: m.memberRole || 'CLASS-A GENERAL',
-          memberHeader: `MEMBER #${m.memberNo}: ${m.memberName}`,
-          memberSubHeader: `Email: ${m.memberEmail || '-'} | Phone: ${m.memberPhone || '-'}`,
-          monthSections,
-          memberTotalAssessed,
-          memberTotalPaid,
-          memberTotalDue,
-        });
-      }
+      sections.push({
+        memberHeader: `MEMBER #${m.memberNo}: ${m.memberName}`,
+        memberSubHeader: `Email: ${m.memberEmail || '-'} | Phone: ${m.memberPhone || '-'}`,
+        monthSections,
+        memberTotalPaid,
+        memberTotalDue,
+      });
     });
 
     const totalDemand = grandTotalPaid + grandTotalDue;
@@ -920,7 +874,7 @@ function ReportHierarchyManagerContent() {
 
     setPrintingReport({
       level: 1,
-      title: 'General Financial Audit & Member Assessment Ledger',
+      title: 'Al-Amanah Society - Complete Transaction & Financial Statement',
       subtitle: `Full Society Ledger | Total Members: ${filteredHierarchy.length} | Total Records: ${totalRecords}`,
       date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
       meta: {
@@ -945,18 +899,12 @@ function ReportHierarchyManagerContent() {
       totalRecords,
     });
 
-    const afterPrintHandler = () => {
-      setPrintingReport(null);
-      window.removeEventListener('afterprint', afterPrintHandler);
-    };
-    window.addEventListener('afterprint', afterPrintHandler);
-
     setTimeout(() => {
       window.print();
-    }, 250);
+      setPrintingReport(null);
+    }, 150);
   };
 
-  // LEVEL 2: Print Specific Member (Big Member Title -> 2nd Big Month Titles -> Tables)
   const handlePrintMemberReport = (member: MemberGroup) => {
     let grandTotalPaid = 0;
     let grandTotalDue = 0;
@@ -966,10 +914,8 @@ function ReportHierarchyManagerContent() {
     let globalSerial = 1;
 
     const monthSections: PrintSection['monthSections'] = [];
-    let memberTotalAssessed = 0;
 
     member.monthGroups.forEach((mg) => {
-      let subTotalAssessed = 0;
       let subTotalPaid = 0;
       let subTotalDue = 0;
 
@@ -977,15 +923,12 @@ function ReportHierarchyManagerContent() {
         const isPaid = it.status === 'paid';
         const paidAmt = isPaid ? it.amount : 0;
         const dueAmt = !isPaid && it.status !== 'rejected' ? it.amount : 0;
-        const assessedAmt = paidAmt + dueAmt;
 
         if (isPaid) paidCount++;
         else if (it.status !== 'rejected') dueCount++;
 
-        subTotalAssessed += assessedAmt;
         subTotalPaid += paidAmt;
         subTotalDue += dueAmt;
-        memberTotalAssessed += assessedAmt;
         grandTotalPaid += paidAmt;
         grandTotalDue += dueAmt;
         totalRecords += 1;
@@ -997,17 +940,14 @@ function ReportHierarchyManagerContent() {
           transactionNo: it.transactionNo || it.receiptNo || '-',
           refNo: it.inputtedReference || '-',
           status: it.isPartial ? 'Partially Paid' : it.status === 'paid' ? 'Paid' : it.status === 'rejected' ? 'Rejected' : it.receiptPhoto ? 'In Review' : 'Due',
-          assessedAmount: assessedAmt,
           paidAmount: paidAmt,
           dueAmount: dueAmt,
-          balanceAmount: dueAmt,
         };
       });
 
       monthSections.push({
         monthTitle: mg.monthLabel,
         campaignTrxNo: mg.campaignTrxNo,
-        subTotalAssessed,
         subTotalPaid,
         subTotalDue,
         rows,
@@ -1016,14 +956,9 @@ function ReportHierarchyManagerContent() {
 
     const sections: PrintSection[] = [
       {
-        memberId: member.memberId,
-        memberName: member.memberName,
-        memberNo: member.memberNo,
-        memberRole: member.memberRole || 'CLASS-A GENERAL',
         memberHeader: `MEMBER #${member.memberNo}: ${member.memberName}`,
         memberSubHeader: `Email: ${member.memberEmail || '-'} | Phone: ${member.memberPhone || '-'}`,
         monthSections,
-        memberTotalAssessed,
         memberTotalPaid: grandTotalPaid,
         memberTotalDue: grandTotalDue,
       },
@@ -1059,20 +994,13 @@ function ReportHierarchyManagerContent() {
       totalRecords,
     });
 
-    const afterPrintHandler = () => {
-      setPrintingReport(null);
-      window.removeEventListener('afterprint', afterPrintHandler);
-    };
-    window.addEventListener('afterprint', afterPrintHandler);
-
     setTimeout(() => {
       window.print();
-    }, 250);
+      setPrintingReport(null);
+    }, 150);
   };
 
-  // LEVEL 3: Print Specific Month for a Member
   const handlePrintMonthReport = (member: MemberGroup, monthGroup: MonthGroup) => {
-    let subTotalAssessed = 0;
     let subTotalPaid = 0;
     let subTotalDue = 0;
     let paidCount = 0;
@@ -1082,12 +1010,10 @@ function ReportHierarchyManagerContent() {
       const isPaid = it.status === 'paid';
       const paidAmt = isPaid ? it.amount : 0;
       const dueAmt = !isPaid && it.status !== 'rejected' ? it.amount : 0;
-      const assessedAmt = paidAmt + dueAmt;
 
       if (isPaid) paidCount++;
       else if (it.status !== 'rejected') dueCount++;
 
-      subTotalAssessed += assessedAmt;
       subTotalPaid += paidAmt;
       subTotalDue += dueAmt;
 
@@ -1098,32 +1024,24 @@ function ReportHierarchyManagerContent() {
         transactionNo: it.transactionNo || it.receiptNo || '-',
         refNo: it.inputtedReference || '-',
         status: it.isPartial ? 'Partially Paid' : it.status === 'paid' ? 'Paid' : it.status === 'rejected' ? 'Rejected' : it.receiptPhoto ? 'In Review' : 'Due',
-        assessedAmount: assessedAmt,
         paidAmount: paidAmt,
         dueAmount: dueAmt,
-        balanceAmount: dueAmt,
       };
     });
 
     const sections: PrintSection[] = [
       {
-        memberId: member.memberId,
-        memberName: member.memberName,
-        memberNo: member.memberNo,
-        memberRole: member.memberRole || 'CLASS-A GENERAL',
         memberHeader: `MEMBER #${member.memberNo}: ${member.memberName}`,
         memberSubHeader: `Email: ${member.memberEmail || '-'} | Phone: ${member.memberPhone || '-'}`,
         monthSections: [
           {
             monthTitle: monthGroup.monthLabel,
             campaignTrxNo: monthGroup.campaignTrxNo,
-            subTotalAssessed,
             subTotalPaid,
             subTotalDue,
             rows,
           },
         ],
-        memberTotalAssessed: subTotalAssessed,
         memberTotalPaid: subTotalPaid,
         memberTotalDue: subTotalDue,
       },
@@ -1159,20 +1077,15 @@ function ReportHierarchyManagerContent() {
       totalRecords: rows.length,
     });
 
-    const afterPrintMonthHandler = () => {
-      setPrintingReport(null);
-      window.removeEventListener('afterprint', afterPrintMonthHandler);
-    };
-    window.addEventListener('afterprint', afterPrintMonthHandler);
-
     setTimeout(() => {
       window.print();
-    }, 250);
+      setPrintingReport(null);
+    }, 150);
   };
 
   return (
     <>
-      <div className="space-y-5 print:hidden">
+      <div className={printingReport ? 'space-y-5 print:hidden' : 'space-y-5'}>
         {/* Top Header & Level 1 Print Banner */}
         <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-emerald-950 text-white p-5 rounded-2xl shadow-sm border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1">
@@ -1562,57 +1475,57 @@ function ReportHierarchyManagerContent() {
                                   </div>
 
                                   {/* Month 5-Status Breakdown Counters (Only show active > 0) */}
-                                  <div className="flex items-center gap-1.5 flex-wrap text-[10px] font-mono">
-                                    {monthGroup.fullyPaidCount > 0 && (
-                                      <span
-                                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-800 border-emerald-300 shadow-2xs font-bold"
-                                        title="Cleared / Fully Paid"
-                                      >
-                                        <CheckCircle2 className="h-3 w-3 text-emerald-600" />
-                                        {monthGroup.fullyPaidCount} Cleared
-                                      </span>
-                                    )}
+                                   <div className="flex items-center gap-1.5 flex-wrap text-[10px] font-mono">
+                                     {monthGroup.fullyPaidCount > 0 && (
+                                       <span
+                                         className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-emerald-50 text-emerald-800 border-emerald-300 shadow-2xs font-bold"
+                                         title="Cleared / Fully Paid"
+                                       >
+                                         <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                                         {monthGroup.fullyPaidCount} Cleared
+                                       </span>
+                                     )}
 
-                                    {monthGroup.partiallyPaidCount > 0 && (
-                                      <span
-                                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-purple-50 text-purple-800 border-purple-300 shadow-2xs font-bold"
-                                        title="Partially Paid"
-                                      >
-                                        <Wallet className="h-3 w-3 text-purple-600" />
-                                        {monthGroup.partiallyPaidCount} Partial
-                                      </span>
-                                    )}
+                                     {monthGroup.partiallyPaidCount > 0 && (
+                                       <span
+                                         className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-purple-50 text-purple-800 border-purple-300 shadow-2xs font-bold"
+                                         title="Partially Paid"
+                                       >
+                                         <Wallet className="h-3 w-3 text-purple-600" />
+                                         {monthGroup.partiallyPaidCount} Partial
+                                       </span>
+                                     )}
 
-                                    {monthGroup.receivedSlipCount > 0 && (
-                                      <span
-                                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-blue-50 text-blue-800 border-blue-300 shadow-2xs font-bold"
-                                        title="Payment Slip Received (In Review)"
-                                      >
-                                        <FileCheck className="h-3 w-3 text-blue-600" />
-                                        {monthGroup.receivedSlipCount} Received
-                                      </span>
-                                    )}
+                                     {monthGroup.receivedSlipCount > 0 && (
+                                       <span
+                                         className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-blue-50 text-blue-800 border-blue-300 shadow-2xs font-bold"
+                                         title="Payment Slip Received (In Review)"
+                                       >
+                                         <FileCheck className="h-3 w-3 text-blue-600" />
+                                         {monthGroup.receivedSlipCount} Received
+                                       </span>
+                                     )}
 
-                                    {monthGroup.pureDuePendingCount > 0 && (
-                                      <span
-                                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-amber-50 text-amber-900 border-amber-300 shadow-2xs font-bold"
-                                        title="Pending Unpaid Dues"
-                                      >
-                                        <Clock className="h-3 w-3 text-amber-600" />
-                                        {monthGroup.pureDuePendingCount} Due
-                                      </span>
-                                    )}
+                                     {monthGroup.pureDuePendingCount > 0 && (
+                                       <span
+                                         className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-amber-50 text-amber-900 border-amber-300 shadow-2xs font-bold"
+                                         title="Pending Unpaid Dues"
+                                       >
+                                         <Clock className="h-3 w-3 text-amber-600" />
+                                         {monthGroup.pureDuePendingCount} Due
+                                       </span>
+                                     )}
 
-                                    {monthGroup.rejectedCount > 0 && (
-                                      <span
-                                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-red-50 text-red-800 border-red-300 shadow-2xs font-bold"
-                                        title="Rejected Proof Slips"
-                                      >
-                                        <XCircle className="h-3 w-3 text-red-600" />
-                                        {monthGroup.rejectedCount} Rejected
-                                      </span>
-                                    )}
-                                  </div>
+                                     {monthGroup.rejectedCount > 0 && (
+                                       <span
+                                         className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-red-50 text-red-800 border-red-300 shadow-2xs font-bold"
+                                         title="Rejected Proof Slips"
+                                       >
+                                         <XCircle className="h-3 w-3 text-red-600" />
+                                         {monthGroup.rejectedCount} Rejected
+                                       </span>
+                                     )}
+                                   </div>
 
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <span className="text-[11px] font-mono font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
@@ -1664,17 +1577,17 @@ function ReportHierarchyManagerContent() {
                                           <TableCell className="py-3 px-2 text-center text-slate-600 font-medium">
                                             {item.date || '-'}
                                           </TableCell>
-                                          <TableCell className="py-3 px-2 text-center font-mono font-bold text-slate-800">
-                                            <div className="flex flex-col items-center gap-1.5">
-                                              <span className="text-emerald-950 font-bold tracking-tight">{item.transactionNo || item.receiptNo || '-'}</span>
-                                              {item.inputtedReference && item.inputtedReference !== '-' && item.inputtedReference !== item.transactionNo && (
-                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
-                                                  <span className="text-amber-700 font-semibold text-[9px] uppercase">Ref:</span>
-                                                  <span className="text-amber-950">{item.inputtedReference}</span>
-                                                </span>
-                                              )}
-                                            </div>
-                                          </TableCell>
+                                           <TableCell className="py-3 px-2 text-center font-mono font-bold text-slate-800">
+                                             <div className="flex flex-col items-center gap-1.5">
+                                               <span className="text-emerald-950 font-bold tracking-tight">{item.transactionNo || item.receiptNo || '-'}</span>
+                                               {item.inputtedReference && item.inputtedReference !== '-' && item.inputtedReference !== item.transactionNo && (
+                                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
+                                                   <span className="text-amber-700 font-semibold text-[9px] uppercase">Ref:</span>
+                                                   <span className="text-amber-950">{item.inputtedReference}</span>
+                                                 </span>
+                                               )}
+                                             </div>
+                                           </TableCell>
                                           <TableCell className="py-3 px-2 text-center text-slate-700">
                                             {item.monthOrDesc}
                                           </TableCell>
@@ -1737,9 +1650,342 @@ function ReportHierarchyManagerContent() {
 
       {/* =========================================================================
           OFFICIAL PRINT ONLY TEMPLATE (LEVELS 1, 2, AND 3)
-          Rendered via dedicated standalone component
+          Structured with Executive Summary Dashboard -> Member Header -> Month Header -> Data Table
           ========================================================================= */}
-      <ReportPrintArea report={printingReport} />
+      {printingReport && (
+        <div className="hidden print:block print:w-full bg-white text-slate-900 p-4 max-w-4xl mx-auto font-sans">
+          {/* Official Society Main Header */}
+          <div className="border-b-2 border-slate-900 pb-3 mb-3">
+            <div className="flex items-start justify-between">
+              <div>
+                <h1 className="text-base font-black uppercase tracking-wider text-slate-900">Al-Amanah Multi-Purpose Co-Operative Society</h1>
+                <p className="text-xs font-bold text-emerald-800 mt-0.5">{printingReport.title}</p>
+                {printingReport.subtitle && (
+                  <p className="text-[10px] text-slate-500 mt-0.5">{printingReport.subtitle}</p>
+                )}
+              </div>
+              <div className="text-right text-[10px] font-mono space-y-0.5">
+                <p><span className="text-slate-500">Date:</span> <strong className="text-slate-900">{printingReport.date}</strong></p>
+                <p><span className="text-slate-500">Total Entries:</span> <strong className="text-slate-900">{printingReport.totalRecords}</strong></p>
+                <p className="text-[9px] text-emerald-700 font-sans font-semibold">Official Society Financial Report</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Executive Summary & Financial Overview KPI Cards (Page 1 Top) */}
+          {printingReport.summaryStats && (
+            <div className="mb-3.5 break-inside-avoid">
+              <div className="grid grid-cols-4 gap-2">
+                <div
+                  className="p-2 rounded border border-emerald-300 bg-emerald-50/60 shadow-2xs"
+                  style={{ backgroundColor: '#f0fdf4', borderColor: '#86efac', WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}
+                >
+                  <p className="text-[9px] font-extrabold text-emerald-900 uppercase tracking-wider">Cleared Collections</p>
+                  <p className="text-xs font-black text-emerald-900 font-mono mt-0.5">
+                    BDT {printingReport.summaryStats.totalPaid.toLocaleString()}
+                  </p>
+                  <p className="text-[9px] text-emerald-700 font-medium mt-0.5">
+                    {printingReport.summaryStats.paidCount} Cleared Records
+                  </p>
+                </div>
+
+                <div
+                  className="p-2 rounded border border-amber-300 bg-amber-50/60 shadow-2xs"
+                  style={{ backgroundColor: '#fffbeb', borderColor: '#fde68a', WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}
+                >
+                  <p className="text-[9px] font-extrabold text-amber-900 uppercase tracking-wider">Outstanding Dues</p>
+                  <p className="text-xs font-black text-amber-900 font-mono mt-0.5">
+                    BDT {printingReport.summaryStats.totalDue.toLocaleString()}
+                  </p>
+                  <p className="text-[9px] text-amber-700 font-medium mt-0.5">
+                    {printingReport.summaryStats.dueCount} Pending Dues
+                  </p>
+                </div>
+
+                <div
+                  className="p-2 rounded border border-blue-300 bg-blue-50/60 shadow-2xs"
+                  style={{ backgroundColor: '#eff6ff', borderColor: '#93c5fd', WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}
+                >
+                  <p className="text-[9px] font-extrabold text-blue-900 uppercase tracking-wider">Total Demand Volume</p>
+                  <p className="text-xs font-black text-blue-900 font-mono mt-0.5">
+                    BDT {printingReport.summaryStats.totalDemand.toLocaleString()}
+                  </p>
+                  <p className="text-[9px] text-blue-700 font-medium mt-0.5">
+                    {printingReport.summaryStats.recoveryRate.toFixed(1)}% Recovery Rate
+                  </p>
+                </div>
+
+                <div
+                  className="p-2 rounded border border-slate-300 bg-slate-50/80 shadow-2xs"
+                  style={{ backgroundColor: '#f8fafc', borderColor: '#cbd5e1', WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}
+                >
+                  <p className="text-[9px] font-extrabold text-slate-800 uppercase tracking-wider">Report Scope</p>
+                  <p className="text-xs font-black text-slate-900 font-mono mt-0.5">
+                    {printingReport.summaryStats.totalMembers} Member{printingReport.summaryStats.totalMembers > 1 ? 's' : ''}
+                  </p>
+                  <p className="text-[9px] text-slate-600 font-medium mt-0.5">
+                    {printingReport.summaryStats.totalRecords} Ledger Entries
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* SECTIONS: MEMBER -> MONTH -> DATA TABLE */}
+          <div className="space-y-6">
+            {printingReport.sections.map((sec, secIdx) => {
+              // Alternating roof line color for Member sections
+              const memberRoofColor = secIdx % 2 === 0 ? '#0f172a' : '#1e3a8a'; // Slate-900 vs Blue-900
+
+              return (
+                <div
+                  key={secIdx}
+                  className="rounded-lg border border-slate-200 bg-white shadow-2xs mb-6 overflow-hidden"
+                  style={{
+                    borderTopWidth: '4px',
+                    borderTopColor: memberRoofColor,
+                    borderTopStyle: 'solid',
+                    marginBottom: '24px',
+                    WebkitPrintColorAdjust: 'exact',
+                    printColorAdjust: 'exact',
+                  }}
+                >
+                  <table
+                    className="print-table w-full text-[10px] border-collapse"
+                    style={{
+                      width: '100%',
+                    }}
+                  >
+                    {/* TABLE THEAD: Automatically repeated by browser print engine on every page where this member's table continues */}
+                    <thead style={{ display: 'table-header-group' }}>
+                      {/* Member Title Banner inside thead */}
+                      <tr className="print-row break-inside-avoid">
+                        <th colSpan={7} className="p-0 border-0 text-left font-normal">
+                          <div
+                            className="text-white px-3 py-2 flex justify-between items-center shadow-xs"
+                            style={{
+                              backgroundColor: memberRoofColor,
+                              WebkitPrintColorAdjust: 'exact',
+                              printColorAdjust: 'exact',
+                            }}
+                          >
+                            <div>
+                              <h2 className="text-xs font-extrabold uppercase tracking-wide text-white">
+                                {sec.memberHeader}
+                              </h2>
+                              {sec.memberSubHeader && (
+                                <p className="text-[9px] text-slate-200 font-normal mt-0.5">{sec.memberSubHeader}</p>
+                              )}
+                            </div>
+                            <div className="text-right text-[10px] font-mono">
+                              <span className="text-emerald-300 font-bold">Cleared: BDT {sec.memberTotalPaid.toLocaleString()}</span>
+                              {sec.memberTotalDue > 0 && (
+                                <span className="text-amber-300 font-bold ml-2.5">Due: BDT {sec.memberTotalDue.toLocaleString()}</span>
+                              )}
+                            </div>
+                          </div>
+                        </th>
+                      </tr>
+
+                      {/* Column Header Titles */}
+                      <tr className="print-row break-inside-avoid border-b-2 border-slate-700 text-slate-700 bg-slate-50/90">
+                        <th className="py-1.5 px-2 text-center w-7">#</th>
+                        <th className="py-1.5 px-2 text-left w-20">Date</th>
+                        <th className="py-1.5 px-2 text-left">Description / Campaign</th>
+                        <th className="py-1.5 px-2 text-left w-36">Transaction ID / Ref</th>
+                        <th className="py-1.5 px-2 text-center w-20">Status</th>
+                        <th className="py-1.5 px-2 text-right w-20">Paid (BDT)</th>
+                        <th className="py-1.5 px-2 text-right w-20">Due (BDT)</th>
+                      </tr>
+                    </thead>
+
+                    <tbody>
+                      {sec.monthSections.map((mSec, mIdx) => {
+                        const monthRoofColor = mIdx % 2 === 0 ? '#047857' : '#0d9488'; // Emerald-700 vs Teal-600
+
+                        return (
+                          <React.Fragment key={mIdx}>
+                            {/* Month Title Divider Banner Row */}
+                            <tr
+                              className="print-row break-inside-avoid"
+                              style={{
+                                backgroundColor: '#f8fafc',
+                                WebkitPrintColorAdjust: 'exact',
+                                printColorAdjust: 'exact',
+                              }}
+                            >
+                              <td
+                                colSpan={7}
+                                className="px-2.5 py-1 text-[10px] font-bold text-slate-800 uppercase tracking-wider border-t border-b border-slate-200"
+                                style={{
+                                  borderLeft: `4px solid ${monthRoofColor}`,
+                                }}
+                              >
+                                <div className="flex justify-between items-center">
+                                  <span className="flex items-center gap-2">
+                                    <span>{mSec.monthTitle}</span>
+                                    {mSec.campaignTrxNo && (
+                                      <span className="font-mono text-[9px] text-emerald-900 bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-300 font-bold">
+                                        {mSec.campaignTrxNo}
+                                      </span>
+                                    )}
+                                  </span>
+                                  <span className="text-[10px] font-mono font-normal">
+                                    <strong className="text-emerald-800 font-bold">Paid: BDT {mSec.subTotalPaid.toLocaleString()}</strong>
+                                    {mSec.subTotalDue > 0 && (
+                                      <strong className="text-amber-800 font-bold ml-2">Due: BDT {mSec.subTotalDue.toLocaleString()}</strong>
+                                    )}
+                                  </span>
+                                </div>
+                              </td>
+                            </tr>
+
+                            {/* Month Transaction Item Rows */}
+                            {mSec.rows.map((row, rIdx) => {
+                              const st = row.status.toLowerCase();
+                              const isPaid = st.includes('paid') && !st.includes('partial');
+                              const isPartial = st.includes('partial');
+                              const isRejected = st.includes('rejected');
+
+                              return (
+                                <tr
+                                  key={rIdx}
+                                  className={`print-row break-inside-avoid border-b border-slate-200 ${
+                                    rIdx % 2 === 1 ? 'bg-slate-100/90 print:bg-slate-100' : 'bg-white'
+                                  }`}
+                                  style={{
+                                    backgroundColor: rIdx % 2 === 1 ? '#f1f5f9' : '#ffffff',
+                                    breakInside: 'avoid',
+                                    pageBreakInside: 'avoid',
+                                    WebkitPrintColorAdjust: 'exact',
+                                    printColorAdjust: 'exact',
+                                  }}
+                                >
+                                  <td className="py-1.5 px-2 text-center text-slate-500 font-mono font-semibold">{row.serial}</td>
+                                  <td className="py-1.5 px-2 text-slate-600 font-medium">{row.date}</td>
+                                  <td className="py-1.5 px-2 text-slate-800 font-medium">{row.description}</td>
+                                  <td className="py-1.5 px-2 font-mono font-bold text-slate-900 text-left">
+                                    <div>
+                                      <span className="text-[10px] text-slate-900">{row.transactionNo || row.refNo || '-'}</span>
+                                      {row.refNo && row.refNo !== '-' && row.refNo !== row.transactionNo && (
+                                        <div className="mt-0.5">
+                                          <span
+                                            className="inline-block px-1.5 py-0.5 rounded text-[9px] font-mono font-bold border"
+                                            style={{
+                                              backgroundColor: '#fef3c7',
+                                              color: '#78350f',
+                                              borderColor: '#fcd34d',
+                                              WebkitPrintColorAdjust: 'exact',
+                                              printColorAdjust: 'exact',
+                                            }}
+                                          >
+                                            Ref: {row.refNo}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="py-1.5 px-2 text-center">
+                                    {isPaid ? (
+                                      <span
+                                        className="inline-block px-2 py-0.5 rounded-full text-[9px] font-bold text-emerald-800 border border-emerald-300"
+                                        style={{ backgroundColor: '#ecfdf5', color: '#065f46', borderColor: '#a7f3d0', WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}
+                                      >
+                                        Paid
+                                      </span>
+                                    ) : isPartial ? (
+                                      <span
+                                        className="inline-block px-2 py-0.5 rounded-full text-[9px] font-bold text-purple-800 border border-purple-300"
+                                        style={{ backgroundColor: '#faf5ff', color: '#6b21a8', borderColor: '#e9d5ff', WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}
+                                      >
+                                        Partial
+                                      </span>
+                                    ) : isRejected ? (
+                                      <span
+                                        className="inline-block px-2 py-0.5 rounded-full text-[9px] font-bold text-red-800 border border-red-300"
+                                        style={{ backgroundColor: '#fef2f2', color: '#991b1b', borderColor: '#fecaca', WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}
+                                      >
+                                        Rejected
+                                      </span>
+                                    ) : (
+                                      <span
+                                        className="inline-block px-2 py-0.5 rounded-full text-[9px] font-bold text-amber-800 border border-amber-300"
+                                        style={{ backgroundColor: '#fffbeb', color: '#92400e', borderColor: '#fde68a', WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}
+                                      >
+                                        Due
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="py-1.5 px-2 text-right font-mono font-bold text-emerald-800">
+                                    {row.paidAmount > 0 ? row.paidAmount.toLocaleString() : '-'}
+                                  </td>
+                                  <td className="py-1.5 px-2 text-right font-mono font-bold text-amber-800">
+                                    {row.dueAmount > 0 ? row.dueAmount.toLocaleString() : '-'}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+
+                            {/* Month Sub-Total Row */}
+                            <tr
+                              className="print-row break-inside-avoid border-t border-b-2 border-slate-300 font-bold bg-slate-50"
+                              style={{
+                                breakInside: 'avoid',
+                                pageBreakInside: 'avoid',
+                                WebkitPrintColorAdjust: 'exact',
+                                printColorAdjust: 'exact',
+                              }}
+                            >
+                              <td colSpan={5} className="py-1.5 px-2 text-right uppercase text-[9px] text-slate-600">
+                                Sub-Total ({mSec.monthTitle}):
+                              </td>
+                              <td className="py-1.5 px-2 text-right font-mono text-emerald-800">
+                                BDT {mSec.subTotalPaid.toLocaleString()}
+                              </td>
+                              <td className="py-1.5 px-2 text-right font-mono text-amber-800">
+                                {mSec.subTotalDue > 0 ? `BDT ${mSec.subTotalDue.toLocaleString()}` : '-'}
+                              </td>
+                            </tr>
+
+                            {/* 1 Row Amount Gap Between Month Tables */}
+                            {mIdx < sec.monthSections.length - 1 && (
+                              <tr
+                                className="print-row break-inside-avoid"
+                                style={{
+                                  backgroundColor: '#ffffff',
+                                  height: '24px',
+                                }}
+                              >
+                                <td colSpan={7} className="py-2 border-0 bg-white" style={{ height: '24px' }}>&nbsp;</td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })}
+
+            {/* GRAND TOTAL BALANCE FOR THE ENTIRE REPORT */}
+            <div className="break-inside-avoid border-t-2 border-b-2 border-slate-900 py-2.5 px-3 bg-slate-50 flex justify-between items-center font-bold text-xs mt-6">
+              <span className="uppercase tracking-wider text-slate-800 text-xs">Grand Total Balance:</span>
+              <div className="flex items-center gap-6 font-mono text-xs">
+                <span className="text-emerald-900">Cleared: BDT {printingReport.grandTotalPaid.toLocaleString()}</span>
+                <span className="text-amber-900">Outstanding Due: BDT {printingReport.grandTotalDue.toLocaleString()}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Official Signatures */}
+          <div className="break-inside-avoid mt-8 pt-3 flex justify-between text-[11px] text-slate-600">
+            <div className="text-center w-36 border-t border-slate-400 pt-1">Prepared By</div>
+            <div className="text-center w-36 border-t border-slate-400 pt-1">Accountant</div>
+            <div className="text-center w-36 border-t border-slate-400 pt-1">Authorized Signatory</div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

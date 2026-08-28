@@ -16,12 +16,14 @@ import {
   Bell,
   LogOut,
   Building2,
+  FileText,
 } from 'lucide-react';
 
 const ICON_MAP: Record<string, React.ElementType> = {
   '/member': LayoutDashboard,
   '/member/transactions': CreditCard,
   '/member/receipts': Receipt,
+  '/member/reports': FileText,
   '/member/profile': User,
   '/member/notifications': Bell,
 };

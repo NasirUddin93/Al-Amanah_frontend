@@ -131,6 +131,7 @@ export const api = createApi({
       title?: string;
       due_date?: string;
       description?: string;
+      transaction_no?: string;
     }>({
       query: (body) => ({ url: '/transactions/generate-payments', method: 'POST', body }),
       invalidatesTags: ['Transactions', 'Receipts', 'Notifications'],
@@ -149,6 +150,8 @@ export const api = createApi({
         payment_method?: string;
         payment_date?: string;
         notes?: string;
+        reference?: string;
+        trx_reference?: string;
         create_receipt?: boolean;
       };
     }>({

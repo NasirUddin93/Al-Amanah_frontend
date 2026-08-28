@@ -99,6 +99,14 @@ export function ReceiptPrintArea({ receipt }: { receipt: (Receipt & { [key: stri
   // Transaction reference value to display based on inputted value
   const displayTrxRef = inputtedTrxRef || receipt.transaction?.transaction_no || '-';
 
+  // Clean Receipt / Transaction Identifier: Prioritize the parent monthly demand transaction ID to match reports
+  let displayReceiptNo = receipt.demandTrxNo || receipt.receipt_no || '';
+  if (displayReceiptNo.startsWith('RCT-TRX-')) {
+    displayReceiptNo = receipt.transaction?.transaction_no || displayReceiptNo.replace(/^RCT-/, '');
+  } else if (!displayReceiptNo) {
+    displayReceiptNo = receipt.transaction?.transaction_no || receipt.transaction?.month || '-';
+  }
+
   return (
     <div className="hidden print:block bg-white p-8 max-w-2xl mx-auto text-slate-900 font-sans">
       {/* Header */}
@@ -111,7 +119,7 @@ export function ReceiptPrintArea({ receipt }: { receipt: (Receipt & { [key: stri
       <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-200">
         <div>
           <div className="text-xs text-slate-500 uppercase font-semibold">Receipt No</div>
-          <div className="text-base font-bold font-mono text-slate-900">{receipt.receipt_no}</div>
+          <div className="text-base font-bold font-mono text-slate-900">{displayReceiptNo}</div>
         </div>
 
         {/* Prominent Status Badge (Paid vs Partially Paid) */}

@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useAppSelector } from '@/store/hooks';
@@ -9,10 +9,15 @@ import {
   useCreateReceiptMutation,
   useGetUsersQuery,
   useGetTransactionsQuery,
+  useCreateTransactionMutation,
+  useUpdateTransactionMutation,
+  useDeleteTransactionMutation,
   useCollectPaymentMutation,
   useRejectReceiptPhotoMutation,
+  useGeneratePaymentsMutation,
+  useGetSettingsQuery,
 } from '@/lib/api';
-import { receiptSchema } from '@/lib/schemas';
+import { transactionSchema, receiptSchema } from '@/lib/schemas';
 import { ReceiptPrintArea } from '@/components/receipt-print';
 import { ReceiptSlipThumbnail, MagnifiableModalImage } from '@/components/receipt-magnifier';
 import type { Receipt, Transaction, User } from '@/types';
@@ -58,6 +63,12 @@ import {
   ZoomIn,
   Eye,
   Calculator,
+  CalendarCheck,
+  Calendar as CalendarIcon,
+  CreditCard,
+  Edit2,
+  Trash2,
+  Sparkles,
 } from 'lucide-react';
 
 interface MemberReceiptItem {
@@ -73,12 +84,48 @@ interface MemberReceiptItem {
   receiptPhotoUploadedAt?: string;
   memberPaidAmount?: number;
   memberTrxReference?: string;
+  inputtedReference?: string;
   isRejected: boolean;
   isPartial?: boolean;
   rejectionReason?: string | null;
   status: 'paid' | 'rejected' | 'pending' | 'partial' | 'partially_paid';
   rawReceipt?: Receipt;
   rawTransaction?: Transaction;
+}
+
+function extractInputtedReference(trx?: any, receipt?: any): string {
+  const directRef =
+    trx?.member_trx_reference ||
+    trx?.transaction_reference ||
+    trx?.reference ||
+    receipt?.member_trx_reference ||
+    receipt?.transaction_reference ||
+    receipt?.reference ||
+    '';
+
+  if (directRef && String(directRef).trim() !== '' && String(directRef).trim() !== '-') {
+    return String(directRef).trim();
+  }
+
+  const desc = trx?.description || receipt?.transaction?.description || '';
+  if (desc) {
+    const refMatches = Array.from(desc.matchAll(/Ref:\s*([^|\n-]+)/gi))
+      .map((m: any) => (m[1] ? String(m[1]).trim() : ''))
+      .filter(Boolean);
+    if (refMatches.length > 0) {
+      return refMatches[refMatches.length - 1];
+    }
+  }
+
+  if (receipt?.receipt_no && String(receipt.receipt_no).trim() !== '') {
+    return String(receipt.receipt_no).trim();
+  }
+
+  if (trx?.transaction_no && String(trx.transaction_no).trim() !== '') {
+    return String(trx.transaction_no).trim();
+  }
+
+  return '-';
 }
 
 export default function AdminReceiptsPage() {
@@ -96,8 +143,53 @@ export default function AdminReceiptsPage() {
   const [expandedMembers, setExpandedMembers] = useState<Record<string | number, boolean>>({});
 
   // Modals & Lightbox State
-  const [openNewModal, setOpenNewModal] = useState(false);
+  const [openDemand, setOpenDemand] = useState(false);
+  const [openSingle, setOpenSingle] = useState(false);
   const [printReceipt, setPrintReceipt] = useState<Receipt | null>(null);
+
+  // Edit Single Transaction / Price State
+  const [openEditTrxModal, setOpenEditTrxModal] = useState(false);
+  const [editingTrx, setEditingTrx] = useState<Transaction | null>(null);
+  const [editTrxAmount, setEditTrxAmount] = useState<string>('');
+  const [editTrxDescription, setEditTrxDescription] = useState<string>('');
+  const [editTrxDueDate, setEditTrxDueDate] = useState<string>('');
+
+  // Edit Batch Demand Price State
+  const [openEditGroupModal, setOpenEditGroupModal] = useState(false);
+  const [editingGroup, setEditingGroup] = useState<any | null>(null);
+  const [editGroupAmount, setEditGroupAmount] = useState<string>('');
+  const [editGroupOnlyUnpaid, setEditGroupOnlyUnpaid] = useState<boolean>(true);
+
+  // Delete Confirmation Modal State
+  const [openDeleteModal, setOpenDeleteModal] = useState(false);
+  const [deletingTrx, setDeletingTrx] = useState<Transaction | null>(null);
+  const [deletingGroup, setDeletingGroup] = useState<any | null>(null);
+
+  // Create & Assign Demand State
+  const [demandCategory, setDemandCategory] = useState<'monthly_payment' | 'one_time'>('monthly_payment');
+  const [targetAllMembers, setTargetAllMembers] = useState(true);
+  const [selectedMemberId, setSelectedMemberId] = useState<string>('');
+  const currentYear = new Date().getFullYear();
+  const [demandYear, setDemandYear] = useState<number>(currentYear);
+  const MONTH_NAMES = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
+  ];
+  const [selectedMonths, setSelectedMonths] = useState<string[]>([
+    `${MONTH_NAMES[new Date().getMonth()]} ${currentYear}`,
+  ]);
+  const [oneTimeTitle, setOneTimeTitle] = useState('Annual General Meeting Fee');
+  const [demandAmount, setDemandAmount] = useState('2000');
+  const [demandDueDate, setDemandDueDate] = useState(new Date().toISOString().split('T')[0]);
+  const [demandDescription, setDemandDescription] = useState('');
+  const [demandTrxNo, setDemandTrxNo] = useState<string>('');
+
+  const generateAutoTrxNo = () => {
+    const d = new Date();
+    const ymd = d.getFullYear().toString() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
+    const rnd = Math.floor(1000 + Math.random() * 9000);
+    setDemandTrxNo(`TRX-${ymd}-${rnd}`);
+  };
 
   const [openPhotoModal, setOpenPhotoModal] = useState(false);
   const [photoModalUrl, setPhotoModalUrl] = useState<string>('');
@@ -112,6 +204,7 @@ export default function AdminReceiptsPage() {
   const [paidAmountInput, setPaidAmountInput] = useState<string>('');
   const [paymentMethodInput, setPaymentMethodInput] = useState<'cash' | 'bank' | 'mobile_banking' | 'other'>('cash');
   const [paymentDateInput, setPaymentDateInput] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [paymentTrxRefInput, setPaymentTrxRefInput] = useState<string>('');
   const [paymentNotesInput, setPaymentNotesInput] = useState<string>('');
 
   // Reject Proof Slip Modal State
@@ -132,20 +225,42 @@ export default function AdminReceiptsPage() {
     { per_page: 1000 },
     { skip: !canManage }
   );
+  const { data: settings } = useGetSettingsQuery();
 
+  const [generatePayments, { isLoading: isGenerating }] = useGeneratePaymentsMutation();
+  const [createTransaction, { isLoading: isCreatingSingle }] = useCreateTransactionMutation();
+  const [updateTransaction, { isLoading: isUpdating }] = useUpdateTransactionMutation();
+  const [deleteTransaction, { isLoading: isDeletingTrx }] = useDeleteTransactionMutation();
   const [createReceipt, { isLoading: isCreating }] = useCreateReceiptMutation();
   const [collectPayment, { isLoading: isCollecting }] = useCollectPaymentMutation();
   const [rejectReceiptPhoto, { isLoading: isRejecting }] = useRejectReceiptPhotoMutation();
 
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<any>({
-    resolver: zodResolver(receiptSchema),
-    defaultValues: {
-      transaction_id: '',
-      amount: '',
-      payment_method: 'cash',
-      receipt_date: new Date().toISOString().split('T')[0],
-    },
+  // Manual Single Record Form
+  const {
+    register: registerSingle,
+    handleSubmit: handleSubmitSingle,
+    reset: resetSingle,
+    formState: { errors: errorsSingle },
+  } = useForm<any>({
+    resolver: zodResolver(transactionSchema),
+    defaultValues: { member_id: '', type: 'payment', amount: '', transaction_date: '', description: '' },
   });
+
+  const onSubmitSingle = async (values: any) => {
+    try {
+      await createTransaction({
+        ...values,
+        member_id: Number(values.member_id),
+        amount: Number(values.amount),
+        status: 'paid',
+      }).unwrap();
+      alert('Transaction recorded successfully.');
+      setOpenSingle(false);
+      resetSingle();
+    } catch (err: any) {
+      alert(err?.data?.message || 'Failed to record transaction.');
+    }
+  };
 
   const rawReceipts: Receipt[] = useMemo(() => {
     return receiptsData?.data || [];
@@ -159,6 +274,47 @@ export default function AdminReceiptsPage() {
     const rawUsers = usersData?.data || [];
     return rawUsers.filter((u) => u.role?.name === 'member');
   }, [usersData]);
+
+  // Set of months of the selected year that are already created (pending or paid)
+  const createdMonthsSet = useMemo(() => {
+    const set = new Set<string>();
+    if (!rawTransactions || rawTransactions.length === 0) return set;
+
+    rawTransactions.forEach((trx) => {
+      if (trx.status !== 'pending' && trx.status !== 'paid') return;
+
+      const trxMemberId = trx.member?.id || (trx as any).member_id;
+
+      if (!targetAllMembers && selectedMemberId) {
+        if (Number(trxMemberId) !== Number(selectedMemberId)) return;
+      }
+
+      const textToScan = `${trx.month || ''} ${trx.description || ''} ${(trx as any).title || ''}`.toLowerCase();
+      const trxYear = trx.transaction_date ? new Date(trx.transaction_date).getFullYear() : (trx.created_at ? new Date(trx.created_at).getFullYear() : null);
+
+      MONTH_NAMES.forEach((m) => {
+        const mLower = m.toLowerCase();
+        if (textToScan.includes(mLower)) {
+          const hasExplicitYear = textToScan.includes(String(demandYear));
+          const isMatchingYear = hasExplicitYear || trxYear === demandYear || (!hasExplicitYear && !trxYear);
+
+          if (isMatchingYear) {
+            set.add(`${m} ${demandYear}`);
+            set.add(m);
+          }
+        }
+      });
+    });
+
+    return set;
+  }, [rawTransactions, targetAllMembers, selectedMemberId, demandYear]);
+
+  // Keep selectedMonths clean from any already created months
+  useEffect(() => {
+    setSelectedMonths((prev) =>
+      prev.filter((mKey) => !createdMonthsSet.has(mKey) && !createdMonthsSet.has(mKey.split(' ')[0]))
+    );
+  }, [createdMonthsSet]);
 
   const memberReceiptGroups = useMemo(() => {
     const map: Record<string, {
@@ -272,6 +428,7 @@ export default function AdminReceiptsPage() {
       const effectiveProofAmount = trx.member_paid_amount ? Number(trx.member_paid_amount) : sisterSlip?.amount;
       const effectiveTrxRef = trx.member_trx_reference || sisterSlip?.ref;
       const effectiveMethod = trx.member_payment_method || sisterSlip?.method;
+      const computedRef = extractInputtedReference(trx, linkedReceipt || trx.receipt);
 
       if (trx.status === 'paid') {
         const isPartialPaid = Boolean(
@@ -284,6 +441,7 @@ export default function AdminReceiptsPage() {
           recordType: 'receipt',
           receiptNo: linkedReceipt?.receipt_no || trx.receipt?.receipt_no,
           transactionNo: trx.transaction_no,
+          inputtedReference: computedRef,
           date: trx.transaction_date,
           monthOrDesc: trx.month || trx.description || 'Payment Receipt',
           amount: Number(trx.amount || 0),
@@ -312,6 +470,7 @@ export default function AdminReceiptsPage() {
           recordType: 'rejected_slip',
           receiptNo: undefined,
           transactionNo: trx.transaction_no,
+          inputtedReference: computedRef,
           date: trx.transaction_date,
           monthOrDesc: trx.month || trx.description || 'Declined Proof',
           amount: Number(trx.amount || 0),
@@ -342,6 +501,7 @@ export default function AdminReceiptsPage() {
             recordType: 'pending_slip',
             receiptNo: undefined,
             transactionNo: trx.transaction_no,
+            inputtedReference: computedRef,
             date: trx.transaction_date,
             monthOrDesc: trx.month || trx.description || 'Submitted Proof Due',
             amount: Number(trx.amount || 0),
@@ -365,6 +525,7 @@ export default function AdminReceiptsPage() {
             recordType: 'pending_slip',
             receiptNo: undefined,
             transactionNo: trx.transaction_no,
+            inputtedReference: computedRef,
             date: trx.transaction_date,
             monthOrDesc: trx.month || trx.description || 'Assigned Due',
             amount: Number(trx.amount || 0),
@@ -426,6 +587,7 @@ export default function AdminReceiptsPage() {
           recordType: 'receipt',
           receiptNo: r.receipt_no,
           transactionNo: r.transaction?.transaction_no || `TRX-STANDALONE-${r.id}`,
+          inputtedReference: extractInputtedReference(r.transaction, r),
           date: r.receipt_date || r.created_at || '',
           monthOrDesc: r.transaction?.month || r.transaction?.description || 'Direct Receipt',
           amount: Number(r.amount || 0),
@@ -449,33 +611,47 @@ export default function AdminReceiptsPage() {
       }
     });
 
-    // Compute each member's current active state from raw transactions
+    // Compute each member's current status strictly based on their latest active transactions/demands
     Object.values(map).forEach((m) => {
       m.items.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
       const memberTrx = rawTransactions.filter(
         (t) => (t.member?.id === m.memberId || (t as any).member_id === m.memberId)
-      );
+      ).sort((a, b) => {
+        const dateA = a.updated_at || a.created_at || a.transaction_date || '';
+        const dateB = b.updated_at || b.created_at || b.transaction_date || '';
+        return dateB.localeCompare(dateA) || (b.id || 0) - (a.id || 0);
+      });
 
-      const paidList = memberTrx.filter((t) => t.status === 'paid');
+      if (memberTrx.length === 0) {
+        m.currentState = 'cleared';
+        return;
+      }
+
+      // Latest pending transactions requiring action
       const pendingList = memberTrx.filter((t) => t.status === 'pending');
+      const paidList = memberTrx.filter((t) => t.status === 'paid');
       const rejectedList = memberTrx.filter((t) => t.status === 'rejected');
 
-      const isFullyPaid = paidList.length > 0 && pendingList.length === 0;
-      const isPartial = paidList.length > 0 && pendingList.length > 0;
-      const isSlipReceived = !isFullyPaid && pendingList.some((t) => !!t.receipt_photo);
-      const isRejectedActive = !isFullyPaid && !isPartial && !isSlipReceived && rejectedList.length > 0;
+      const latestTrx = memberTrx[0];
+      const activePendingWithSlip = pendingList.filter((t) => !!t.receipt_photo);
+      const activePendingNoSlip = pendingList.filter((t) => !t.receipt_photo);
 
-      if (isFullyPaid) {
-        m.currentState = 'cleared';
-      } else if (isPartial) {
-        m.currentState = 'partial';
-      } else if (isSlipReceived) {
+      if (activePendingWithSlip.length > 0) {
+        // Has a proof slip uploaded currently in review
         m.currentState = 'received';
-      } else if (isRejectedActive) {
+      } else if (paidList.length > 0 && activePendingNoSlip.length > 0) {
+        // Has partially paid some dues while other dues are active pending
+        m.currentState = 'partial';
+      } else if (activePendingNoSlip.length > 0) {
+        // Has pending unpaid dues with no slip
+        m.currentState = 'due';
+      } else if (latestTrx.status === 'rejected' && pendingList.length === 0) {
+        // Latest action was a rejection
         m.currentState = 'rejected';
       } else {
-        m.currentState = 'due';
+        // All active dues are settled / paid
+        m.currentState = 'cleared';
       }
     });
 
@@ -484,27 +660,92 @@ export default function AdminReceiptsPage() {
 
   const stats = useMemo(() => {
     const totalReceipts = rawReceipts.length;
-    const totalClearedAmount = rawReceipts.reduce((sum, r) => sum + Number(r.amount || 0), 0);
     const totalMembers = memberReceiptGroups.length;
 
-    // Current State counts per member
-    const currentClearedCount = memberReceiptGroups.filter((g: any) => g.currentState === 'cleared').length;
-    const currentPartialCount = memberReceiptGroups.filter((g: any) => g.currentState === 'partial').length;
-    const currentReceivedCount = memberReceiptGroups.filter((g: any) => g.currentState === 'received').length;
-    const currentDueCount = memberReceiptGroups.filter((g: any) => g.currentState === 'due').length;
-    const currentRejectedCount = memberReceiptGroups.filter((g: any) => g.currentState === 'rejected').length;
+    let totalClearedAmount = 0;
+    let clearedReceiptsCount = 0;
+    let partialCount = 0;
+    let partialCollectedAmount = 0;
+    let receivedSlipsCount = 0;
+    let receivedSlipsAmount = 0;
+    let duePendingCount = 0;
+    let duePendingAmount = 0;
+    let rejectedSlipsCount = 0;
+    let rejectedSlipsAmount = 0;
+
+    // Group transactions by member + month (or description) to evaluate each demand's latest status
+    const demandMap: Record<string, Transaction[]> = {};
+    rawTransactions.forEach((trx) => {
+      const mId = trx.member?.id || (trx as any).member_id || `anon_${trx.id}`;
+      const demandKey = `${mId}___${(trx.month || trx.description || 'general').trim().toLowerCase()}`;
+      if (!demandMap[demandKey]) demandMap[demandKey] = [];
+      demandMap[demandKey].push(trx);
+    });
+
+    // Calculate count and money amounts based on the latest status of each member's demand
+    Object.values(demandMap).forEach((trxList) => {
+      const sorted = [...trxList].sort((a, b) => {
+        const dateA = a.updated_at || a.created_at || a.transaction_date || '';
+        const dateB = b.updated_at || b.created_at || b.transaction_date || '';
+        return dateB.localeCompare(dateA) || (b.id || 0) - (a.id || 0);
+      });
+
+      const paidList = sorted.filter((t) => t.status === 'paid');
+      const pendingList = sorted.filter((t) => t.status === 'pending');
+      const rejectedList = sorted.filter((t) => t.status === 'rejected');
+
+      const isFullyPaid = paidList.length > 0 && pendingList.length === 0;
+      const isPartial = paidList.length > 0 && pendingList.length > 0;
+      const isSlipReceived = !isFullyPaid && pendingList.some((t) => !!t.receipt_photo);
+      const isRejectedActive = !isFullyPaid && !isPartial && !isSlipReceived && rejectedList.length > 0;
+
+      const demandPaidTotal = paidList.reduce((sum, t) => sum + Number(t.amount || 0), 0);
+      const demandPendingTotal = pendingList.reduce((sum, t) => sum + Number(t.amount || 0), 0);
+      const demandRejectedTotal = rejectedList.reduce((sum, t) => sum + Number(t.amount || 0), 0);
+
+      totalClearedAmount += demandPaidTotal;
+
+      if (isFullyPaid) {
+        clearedReceiptsCount += 1;
+      } else if (isPartial) {
+        partialCount += 1;
+        partialCollectedAmount += demandPaidTotal;
+        duePendingAmount += demandPendingTotal;
+      } else if (isSlipReceived) {
+        receivedSlipsCount += 1;
+        receivedSlipsAmount += demandPendingTotal;
+        duePendingAmount += demandPendingTotal;
+      } else if (isRejectedActive) {
+        rejectedSlipsCount += 1;
+        rejectedSlipsAmount += demandRejectedTotal;
+        duePendingAmount += (demandPendingTotal || demandRejectedTotal);
+      } else {
+        duePendingCount += 1;
+        duePendingAmount += demandPendingTotal;
+      }
+    });
+
+    // Total demands created across all months
+    const totalDemandsCount = Object.keys(demandMap).length;
+    // All demands that are not completely cleared count as due pending
+    const totalDueRemainingCount = Math.max(0, totalDemandsCount - clearedReceiptsCount);
 
     return {
       totalReceipts,
       totalClearedAmount,
-      currentClearedCount,
-      currentPartialCount,
-      currentReceivedCount,
-      currentDueCount,
-      currentRejectedCount,
+      currentClearedCount: clearedReceiptsCount,
+      currentPartialCount: partialCount,
+      partialCollectedAmount,
+      currentReceivedCount: receivedSlipsCount,
+      receivedSlipsAmount,
+      currentDueCount: totalDueRemainingCount,
+      duePendingAmount,
+      pureUnpaidDueCount: duePendingCount,
+      currentRejectedCount: rejectedSlipsCount,
+      rejectedSlipsAmount,
       totalMembers,
     };
-  }, [rawReceipts, memberReceiptGroups]);
+  }, [rawReceipts, rawTransactions, memberReceiptGroups]);
 
   const filteredMemberGroups = useMemo(() => {
     return memberReceiptGroups.filter((g: any) => {
@@ -611,6 +852,8 @@ export default function AdminReceiptsPage() {
 
   const createdDemandGroups = useMemo(() => {
     const groups: Record<string, {
+      id?: number | string;
+      transaction_no?: string;
       key: string;
       title: string;
       category: string;
@@ -646,6 +889,8 @@ export default function AdminReceiptsPage() {
         }
 
         groups[groupKey] = {
+          id: t.id,
+          transaction_no: t.transaction_no,
           key: groupKey,
           title,
           category: t.payment_category || t.type,
@@ -680,9 +925,7 @@ export default function AdminReceiptsPage() {
         .filter((t) => t.status === 'paid')
         .reduce((sum, t) => sum + Number(t.amount || 0), 0);
 
-      // Group active transactions by member ID to evaluate each member's status
       const memberStatusMap: Record<string | number, { hasPaid: boolean; hasPending: boolean }> = {};
-      
       targetTrxList.forEach((t) => {
         const mId = t.member?.id || (t as any).member_id;
         if (!mId) return;
@@ -718,12 +961,32 @@ export default function AdminReceiptsPage() {
         : (totalCollectedAmount > 0 ? 100 : 0);
       const isFullyPaid = pendingMembersCount === 0 && totalMembersAssigned > 0;
 
+      // Calculate 5-status count breakdown for each demand group
+      let duePendingCount = 0;
+      let receivedSlipCount = 0;
+      let rejectedCount = 0;
+
+      Object.entries(memberStatusMap).forEach(([mId, st]) => {
+        if (st.hasPaid && !st.hasPending) {
+          return;
+        }
+        const mTrxList = g.transactions.filter((t) => (String(t.member?.id) === String(mId) || String((t as any).member_id) === String(mId)));
+        const hasSlip = mTrxList.some((t) => t.status === 'pending' && !!t.receipt_photo);
+        const isRej = mTrxList.some((t) => t.status === 'rejected');
+        if (hasSlip) receivedSlipCount += 1;
+        else if (isRej) rejectedCount += 1;
+        else duePendingCount += 1;
+      });
+
       return {
         ...g,
         totalMembersAssigned,
         paidCount: fullyPaidMembersCount,
         partiallyPaidCount: partiallyPaidMembersCount,
         pendingCount: pendingMembersCount,
+        duePendingCount,
+        receivedSlipCount,
+        rejectedCount,
         totalDemandAmount,
         totalCollectedAmount,
         progressPercent,
@@ -741,73 +1004,150 @@ export default function AdminReceiptsPage() {
 
   const filteredCreatedGroups = useMemo(() => {
     return createdDemandGroups.filter((g) => {
-      const memberTrxMap: Record<string | number, Transaction[]> = {};
-      g.transactions.forEach((trx) => {
-        const mId = trx.member?.id || (trx as any).member_id || `anon_${trx.id}`;
-        if (!memberTrxMap[mId]) memberTrxMap[mId] = [];
-        memberTrxMap[mId].push(trx);
-      });
+      if (statusFilter === 'paid' && !g.isFullyPaid) return false;
+      if (statusFilter === 'pending' && g.isFullyPaid) return false;
 
-      const matchingMembers = Object.entries(memberTrxMap).filter(([mId, trxList]) => {
-        const paidList = trxList.filter((t) => t.status === 'paid');
-        const pendingList = trxList.filter((t) => t.status === 'pending');
-        const rejectedList = trxList.filter((t) => t.status === 'rejected');
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const modifier = getModifierInfo(g);
+        const titleMatch = g.title.toLowerCase().includes(q);
+        const monthMatch = g.month?.toLowerCase().includes(q);
+        const catMatch = g.category.toLowerCase().includes(q);
+        const adminMatch = modifier.name.toLowerCase().includes(q) || modifier.role.toLowerCase().includes(q);
+        return titleMatch || monthMatch || catMatch || adminMatch;
+      }
 
-        const isFullyPaid = paidList.length > 0 && pendingList.length === 0;
-        const isPartial = paidList.length > 0 && pendingList.length > 0;
-        const isSlipReceived = !isFullyPaid && pendingList.some((t) => !!t.receipt_photo);
-        const isRejectedActive = !isFullyPaid && !isPartial && !isSlipReceived && rejectedList.length > 0;
-
-        let memberBatchStatus: 'cleared' | 'partial' | 'received_slip' | 'due' | 'rejected' = 'due';
-        if (isFullyPaid) memberBatchStatus = 'cleared';
-        else if (isPartial) memberBatchStatus = 'partial';
-        else if (isSlipReceived) memberBatchStatus = 'received_slip';
-        else if (isRejectedActive) memberBatchStatus = 'rejected';
-        else memberBatchStatus = 'due';
-
-        if (statusFilter === 'paid' && memberBatchStatus !== 'cleared') return false;
-        if (statusFilter === 'partial' && memberBatchStatus !== 'partial') return false;
-        if (statusFilter === 'received_slip' && memberBatchStatus !== 'received_slip') return false;
-        if (statusFilter === 'pending' && memberBatchStatus !== 'due') return false;
-        if (statusFilter === 'rejected' && memberBatchStatus !== 'rejected') return false;
-
-        if (paymentMethodFilter !== 'all') {
-          const hasMethod = trxList.some((t) => {
-            const m = (t.member_payment_method || (t.receipt?.payment_method) || (t.type === 'deposit' ? 'cash' : '')).toLowerCase();
-            return m.includes(paymentMethodFilter.toLowerCase());
-          });
-          if (!hasMethod) return false;
-        }
-
-        if (searchQuery.trim()) {
-          const q = searchQuery.toLowerCase();
-          const primary = trxList[0];
-          const mName = primary?.member?.name?.toLowerCase() || '';
-          const mNo = (primary?.member?.member_no || (primary?.member as any)?.member_profile?.member_no || '').toLowerCase();
-          const hasMatchingTrx = trxList.some((t) => {
-            return (
-              (t.transaction_no || '').toLowerCase().includes(q) ||
-              (t.receipt?.receipt_no || '').toLowerCase().includes(q) ||
-              (t.rejection_reason || '').toLowerCase().includes(q) ||
-              (t.description || '').toLowerCase().includes(q)
-            );
-          });
-          if (!mName.includes(q) && !mNo.includes(q) && !hasMatchingTrx) return false;
-        }
-
-        return true;
-      });
-
-      return matchingMembers.length > 0;
+      return true;
     });
-  }, [createdDemandGroups, statusFilter, paymentMethodFilter, searchQuery]);
+  }, [createdDemandGroups, statusFilter, searchQuery]);
 
   const toggleExpandGroup = (groupKey: string) => {
     setExpandedGroups((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }));
   };
 
-  const toggleExpandMember = (mId: string | number) => {
-    setExpandedMembers((prev) => ({ ...prev, [mId]: !prev[mId] }));
+  const toggleExpandMember = (memberId: string | number) => {
+    setExpandedMembers((prev) => ({ ...prev, [memberId]: !prev[memberId] }));
+  };
+
+  // Open Edit Single Transaction / Price Modal
+  const openEditSingleTrx = (itemOrTrx: Transaction | MemberReceiptItem | any) => {
+    const trx = itemOrTrx.rawTransaction || itemOrTrx;
+    setEditingTrx(trx);
+    setEditTrxAmount(String(trx.amount || itemOrTrx.amount || ''));
+    setEditTrxDescription(trx.description || trx.month || itemOrTrx.monthOrDesc || '');
+    setEditTrxDueDate(trx.transaction_date || trx.date || itemOrTrx.date || '');
+    setOpenEditTrxModal(true);
+  };
+
+  // Submit Edit Single Transaction
+  const handleSaveEditTrx = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTrx) return;
+
+    const numAmount = Number(editTrxAmount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      alert('Please enter a valid positive amount.');
+      return;
+    }
+
+    try {
+      await updateTransaction({
+        id: editingTrx.id,
+        body: {
+          amount: numAmount,
+          description: editTrxDescription,
+          transaction_date: editTrxDueDate,
+        },
+      }).unwrap();
+
+      alert('Transaction updated successfully.');
+      setOpenEditTrxModal(false);
+      setEditingTrx(null);
+    } catch (err: any) {
+      alert(err?.data?.message || 'Failed to update transaction.');
+    }
+  };
+
+  // Open Edit Group / Demand Price Modal
+  const openEditBatchGroup = (group: any) => {
+    setEditingGroup(group);
+    setEditGroupAmount(String(group.perMemberAmount || ''));
+    setEditGroupOnlyUnpaid(true);
+    setOpenEditGroupModal(true);
+  };
+
+  // Submit Edit Batch Group Price
+  const handleSaveEditGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingGroup) return;
+
+    const numAmount = Number(editGroupAmount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      alert('Please enter a valid positive amount.');
+      return;
+    }
+
+    try {
+      const targetList = editGroupOnlyUnpaid
+        ? editingGroup.transactions.filter((t: Transaction) => t.status !== 'paid')
+        : editingGroup.transactions;
+
+      if (targetList.length === 0) {
+        alert('No eligible transactions to update.');
+        return;
+      }
+
+      await Promise.all(
+        targetList.map((t: Transaction) =>
+          updateTransaction({
+            id: t.id,
+            body: { amount: numAmount },
+          }).unwrap()
+        )
+      );
+
+      alert(`Successfully updated fee/price for ${targetList.length} transaction records.`);
+      setOpenEditGroupModal(false);
+      setEditingGroup(null);
+    } catch (err: any) {
+      alert(err?.data?.message || 'Failed to update demand price.');
+    }
+  };
+
+  // Open Delete Modal
+  const promptDeleteTrx = (itemOrTrx: Transaction | MemberReceiptItem | any) => {
+    const trx = itemOrTrx.rawTransaction || itemOrTrx;
+    setDeletingTrx(trx);
+    setDeletingGroup(null);
+    setOpenDeleteModal(true);
+  };
+
+  const promptDeleteGroup = (group: any) => {
+    setDeletingGroup(group);
+    setDeletingTrx(null);
+    setOpenDeleteModal(true);
+  };
+
+  // Execute Delete
+  const handleConfirmDelete = async () => {
+    try {
+      if (deletingTrx) {
+        await deleteTransaction(deletingTrx.id).unwrap();
+        alert('Transaction record deleted successfully.');
+      } else if (deletingGroup) {
+        await Promise.all(
+          deletingGroup.transactions.map((t: Transaction) =>
+            deleteTransaction(t.id).unwrap()
+          )
+        );
+        alert(`Successfully deleted all ${deletingGroup.transactions.length} records under this demand.`);
+      }
+      setOpenDeleteModal(false);
+      setDeletingTrx(null);
+      setDeletingGroup(null);
+    } catch (err: any) {
+      alert(err?.data?.message || 'Failed to delete record.');
+    }
   };
 
   const handlePrint = (
@@ -819,6 +1159,7 @@ export default function AdminReceiptsPage() {
       previousPaidAmount?: number;
       totalDueAmount?: number;
       totalAssignedAmount?: number;
+      demandTrxNo?: string;
       previousReferences?: (string | { ref: string; amount?: number; date?: string })[];
     }
   ) => {
@@ -826,14 +1167,21 @@ export default function AdminReceiptsPage() {
 
     if (r) {
       const linkedTrx = fallbackTrx || (r.transaction?.id ? r.transaction : rawTransactions.find((t) => t.id === (r as any).transaction_id || t.receipt?.id === r.id));
+      const cleanReceiptNo = r.receipt_no && r.receipt_no.startsWith('RCT-TRX-')
+        ? (linkedTrx?.transaction_no || r.receipt_no.replace(/^RCT-/, ''))
+        : r.receipt_no;
       baseReceipt = {
         ...r,
+        receipt_no: cleanReceiptNo || linkedTrx?.transaction_no || linkedTrx?.month || r.receipt_no,
         transaction: linkedTrx || r.transaction,
       };
     } else if (fallbackTrx) {
+      const cleanReceiptNo = fallbackTrx.receipt?.receipt_no && !fallbackTrx.receipt.receipt_no.startsWith('RCT-TRX-')
+        ? fallbackTrx.receipt.receipt_no
+        : (fallbackTrx.transaction_no || fallbackTrx.month || `TRX-${fallbackTrx.id}`);
       baseReceipt = {
         id: fallbackTrx.id,
-        receipt_no: fallbackTrx.receipt?.receipt_no || `RCT-${fallbackTrx.transaction_no}`,
+        receipt_no: cleanReceiptNo,
         receipt_date: fallbackTrx.transaction_date || new Date().toISOString().split('T')[0],
         amount: Number(fallbackTrx.amount || 0),
         payment_method: (fallbackTrx.member_payment_method as any) || 'cash',
@@ -876,6 +1224,20 @@ export default function AdminReceiptsPage() {
       }
     }
 
+    const monthKey = fallbackTrx?.month || baseReceipt.transaction?.month || (desc ? MONTH_NAMES.find((m) => desc.toLowerCase().includes(m.toLowerCase())) : null);
+    let parentDemandTrxNo = '';
+    if (monthKey) {
+      const match = createdDemandGroups.find((g) =>
+        (g.month && g.month.trim().toLowerCase() === String(monthKey).trim().toLowerCase()) ||
+        g.title.toLowerCase().includes(String(monthKey).trim().toLowerCase())
+      );
+      if (match?.transaction_no) {
+        parentDemandTrxNo = match.transaction_no;
+      }
+    }
+
+    const demandTrxNo = partialMeta?.demandTrxNo || parentDemandTrxNo || baseReceipt.receipt_no || fallbackTrx?.transaction_no;
+
     const enrichedReceipt: Receipt & {
       isPartial?: boolean;
       totalPaidAmount?: number;
@@ -883,9 +1245,12 @@ export default function AdminReceiptsPage() {
       totalDueAmount?: number;
       totalAssignedAmount?: number;
       installmentAmount?: number;
+      demandTrxNo?: string;
       previousReferences?: (string | { ref: string; amount?: number; date?: string })[];
     } = {
       ...baseReceipt,
+      receipt_no: demandTrxNo || baseReceipt.receipt_no,
+      demandTrxNo: demandTrxNo,
       isPartial,
       totalPaidAmount: totalPaid,
       previousPaidAmount: previousPaid,
@@ -927,11 +1292,8 @@ export default function AdminReceiptsPage() {
     setPaidAmountInput(defaultAmount);
     setPaymentMethodInput((trx.member_payment_method as any) || 'cash');
     setPaymentDateInput(new Date().toISOString().split('T')[0]);
-
-    const noteParts: string[] = [];
-    if (trx.member_trx_reference) noteParts.push(`Ref: ${trx.member_trx_reference}`);
-    if (trx.member_comment) noteParts.push(`Note: ${trx.member_comment}`);
-    setPaymentNotesInput(noteParts.join(' | '));
+    setPaymentTrxRefInput(trx.member_trx_reference || '');
+    setPaymentNotesInput(trx.member_comment || '');
     setOpenCollectModal(true);
   };
 
@@ -952,13 +1314,19 @@ export default function AdminReceiptsPage() {
     if (!confirmed) return;
 
     try {
+      const combinedNotes: string[] = [];
+      if (paymentTrxRefInput.trim()) combinedNotes.push(`Ref: ${paymentTrxRefInput.trim()}`);
+      if (paymentNotesInput.trim()) combinedNotes.push(`Note: ${paymentNotesInput.trim()}`);
+
       const res = await collectPayment({
         id: collectingTrx.id,
         body: {
           paid_amount: numAmount,
           payment_method: paymentMethodInput,
           payment_date: paymentDateInput,
-          notes: paymentNotesInput || undefined,
+          trx_reference: paymentTrxRefInput.trim() || undefined,
+          reference: paymentTrxRefInput.trim() || undefined,
+          notes: combinedNotes.length > 0 ? combinedNotes.join(' | ') : (paymentNotesInput.trim() || undefined),
         },
       }).unwrap();
 
@@ -1006,19 +1374,69 @@ export default function AdminReceiptsPage() {
     }
   };
 
-  const onSubmit = async (values: any) => {
+  const handleToggleMonth = (monthWithYear: string) => {
+    const mName = monthWithYear.split(' ')[0];
+    if (createdMonthsSet.has(monthWithYear) || createdMonthsSet.has(mName)) return;
+    if (selectedMonths.includes(monthWithYear)) {
+      setSelectedMonths(selectedMonths.filter((m) => m !== monthWithYear));
+    } else {
+      setSelectedMonths([...selectedMonths, monthWithYear]);
+    }
+  };
+
+  const handleSelectAllMonths = () => {
+    const available = MONTH_NAMES
+      .map((m) => `${m} ${demandYear}`)
+      .filter((mKey) => !createdMonthsSet.has(mKey) && !createdMonthsSet.has(mKey.split(' ')[0]));
+    setSelectedMonths(available);
+  };
+
+  const handleClearMonths = () => {
+    setSelectedMonths([]);
+  };
+
+  const onSubmitDemand = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const memberIds = targetAllMembers
+      ? ['all']
+      : selectedMemberId
+      ? [Number(selectedMemberId)]
+      : [];
+
+    if (!targetAllMembers && memberIds.length === 0) {
+      alert('Please select at least one member.');
+      return;
+    }
+
+    if (demandCategory === 'monthly_payment' && selectedMonths.length === 0) {
+      alert('Please select at least one month.');
+      return;
+    }
+
+    const numAmount = Number(demandAmount);
+    if (isNaN(numAmount) || numAmount <= 0) {
+      alert('Please enter a valid positive amount.');
+      return;
+    }
+
     try {
-      await createReceipt({
-        ...values,
-        transaction_id: Number(values.transaction_id),
-        amount: Number(values.amount),
+      const res = await generatePayments({
+        payment_category: demandCategory,
+        member_ids: memberIds,
+        amount: numAmount,
+        months: demandCategory === 'monthly_payment' ? selectedMonths : undefined,
+        title: demandCategory === 'one_time' ? oneTimeTitle : undefined,
+        due_date: demandDueDate,
+        description: demandDescription || undefined,
+        transaction_no: demandTrxNo.trim() || undefined,
       }).unwrap();
 
-      alert('Receipt issued successfully!');
-      setOpenNewModal(false);
-      reset();
+      alert(`Success! Generated ${res.count} pending payment demands for members.`);
+      setOpenDemand(false);
+      setDemandTrxNo('');
     } catch (err: any) {
-      alert(err?.data?.message || 'Failed to create receipt.');
+      alert(err?.data?.message || 'Failed to generate payment demands.');
     }
   };
 
@@ -1035,414 +1453,519 @@ export default function AdminReceiptsPage() {
           </div>
 
           {canManage && (
-            <Button
-              onClick={() => setOpenNewModal(true)}
-              className="flex items-center gap-2 cursor-pointer bg-emerald-700 hover:bg-emerald-800 shadow-sm self-start sm:self-auto"
-            >
-              <PlusCircle className="h-4 w-4" /> Issue New Receipt
-            </Button>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <Button
+                onClick={() => {
+                  const settingsList = Array.isArray(settings) ? settings : (settings as any)?.data || [];
+                  const defaultFee = settingsList.find((s: any) => s.setting_key === 'payment_amount_1')?.setting_value || '2000';
+                  setDemandAmount(defaultFee);
+                  setTargetAllMembers(true);
+                  setSelectedMemberId('');
+                  const currentYr = new Date().getFullYear();
+                  setDemandYear(currentYr);
+                  const firstAvailable = MONTH_NAMES
+                    .map((m) => `${m} ${currentYr}`)
+                    .find((mKey) => !createdMonthsSet.has(mKey) && !createdMonthsSet.has(mKey.split(' ')[0]));
+                  setSelectedMonths(firstAvailable ? [firstAvailable] : []);
+                  setOpenDemand(true);
+                }}
+                className="flex items-center gap-2 cursor-pointer bg-emerald-700 hover:bg-emerald-800 shadow-sm"
+              >
+                <CalendarCheck className="h-4 w-4" /> Create / Assign Payment
+              </Button>
+            </div>
           )}
         </div>
 
-      {/* Summary Stat Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3.5">
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 uppercase">Cleared Members</span>
-            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-          </div>
-          <p className="text-xl font-extrabold text-emerald-800 mt-1.5">
-            {stats.currentClearedCount}
-          </p>
-          <p className="text-[11px] font-mono text-emerald-700 mt-0.5">
-            BDT {stats.totalClearedAmount.toLocaleString()} cleared
-          </p>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-purple-700 uppercase">Partially Paid</span>
-            <Wallet className="h-4 w-4 text-purple-600" />
-          </div>
-          <p className="text-xl font-extrabold text-purple-800 mt-1.5">
-            {stats.currentPartialCount}
-          </p>
-          <p className="text-[11px] text-purple-600 mt-0.5">
-            Members with active partial dues
-          </p>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-blue-700 uppercase">Received Slips</span>
-            <FileCheck className="h-4 w-4 text-blue-600" />
-          </div>
-          <p className="text-xl font-extrabold text-blue-800 mt-1.5">
-            {stats.currentReceivedCount}
-          </p>
-          <p className="text-[11px] text-blue-600 mt-0.5">
-            Members awaiting slip review
-          </p>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-amber-700 uppercase">Due Pending</span>
-            <Clock className="h-4 w-4 text-amber-600" />
-          </div>
-          <p className="text-xl font-extrabold text-amber-800 mt-1.5">
-            {stats.currentDueCount}
-          </p>
-          <p className="text-[11px] text-amber-600 mt-0.5">
-            Members with unpaid dues
-          </p>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs col-span-2 lg:col-span-1">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-red-700 uppercase">Rejected Slips</span>
-            <XCircle className="h-4 w-4 text-red-600" />
-          </div>
-          <p className="text-xl font-extrabold text-red-800 mt-1.5">
-            {stats.currentRejectedCount}
-          </p>
-          <p className="text-[11px] text-red-600 mt-0.5">
-            Members with declined slips
-          </p>
-        </div>
-      </div>
-
-      {/* Main Ledger Control & View Switcher */}
-      <div className="space-y-4">
-        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* View Mode Toggle */}
-            <div className="flex items-center bg-slate-100 p-1 rounded-lg">
-              <button
-                onClick={() => setActiveTab('created')}
-                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
-                  activeTab === 'created'
-                    ? 'bg-white text-emerald-900 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <ReceiptIcon className="h-3.5 w-3.5 text-emerald-700" />
-                Demand Batches Created ({createdDemandGroups.length})
-              </button>
-              <button
-                onClick={() => setActiveTab('members')}
-                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
-                  activeTab === 'members'
-                    ? 'bg-white text-emerald-900 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Users className="h-3.5 w-3.5 text-emerald-700" />
-                Member Folders ({stats.totalMembers})
-              </button>
-              <button
-                onClick={() => setActiveTab('all')}
-                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
-                  activeTab === 'all'
-                    ? 'bg-white text-emerald-900 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <ReceiptIcon className="h-3.5 w-3.5 text-emerald-700" />
-                All Records Table ({allChronologicalItems.length})
-              </button>
+        {/* Summary Stat Cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3.5">
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-500 uppercase">Cleared Receipts</span>
+              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
             </div>
+            <p className="text-xl font-extrabold text-emerald-800 mt-1.5">
+              {stats.currentClearedCount}
+            </p>
+            <p className="text-[11px] font-mono text-emerald-700 mt-0.5">
+              BDT {stats.totalClearedAmount.toLocaleString()} cleared
+            </p>
+          </div>
 
-            {/* Status Quick Filter Buttons */}
-            <div className="flex items-center gap-1 border-l border-slate-200 pl-2 flex-wrap">
-              <button
-                onClick={() => setStatusFilter('all')}
-                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer ${
-                  statusFilter === 'all'
-                    ? 'bg-slate-800 text-white shadow-2xs'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                }`}
-              >
-                All
-              </button>
-              <button
-                onClick={() => setStatusFilter('paid')}
-                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1 ${
-                  statusFilter === 'paid'
-                    ? 'bg-emerald-700 text-white shadow-2xs'
-                    : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
-                }`}
-              >
-                <CheckCircle2 className="h-3 w-3" />
-                Cleared ({stats.currentClearedCount})
-              </button>
-              <button
-                onClick={() => setStatusFilter('partial')}
-                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1 ${
-                  statusFilter === 'partial'
-                    ? 'bg-purple-700 text-white shadow-2xs'
-                    : 'bg-purple-50 text-purple-800 hover:bg-purple-100'
-                }`}
-              >
-                <Wallet className="h-3 w-3" />
-                Partial ({stats.currentPartialCount})
-              </button>
-              <button
-                onClick={() => setStatusFilter('received_slip')}
-                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1 ${
-                  statusFilter === 'received_slip'
-                    ? 'bg-blue-700 text-white shadow-2xs'
-                    : 'bg-blue-50 text-blue-800 hover:bg-blue-100'
-                }`}
-              >
-                <FileCheck className="h-3 w-3" />
-                Received ({stats.currentReceivedCount})
-              </button>
-              <button
-                onClick={() => setStatusFilter('pending')}
-                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1 ${
-                  statusFilter === 'pending'
-                    ? 'bg-amber-600 text-white shadow-2xs'
-                    : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
-                }`}
-              >
-                <Clock className="h-3 w-3" />
-                Due ({stats.currentDueCount})
-              </button>
-              <button
-                onClick={() => setStatusFilter('rejected')}
-                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1 ${
-                  statusFilter === 'rejected'
-                    ? 'bg-red-600 text-white shadow-2xs'
-                    : 'bg-red-50 text-red-800 hover:bg-red-100'
-                }`}
-              >
-                <XCircle className="h-3 w-3" />
-                Rejected ({stats.currentRejectedCount})
-              </button>
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-purple-700 uppercase">Partially Paid</span>
+              <Wallet className="h-4 w-4 text-purple-600" />
             </div>
+            <p className="text-xl font-extrabold text-purple-800 mt-1.5">
+              {stats.currentPartialCount}
+            </p>
+            <p className="text-[11px] font-mono text-purple-700 mt-0.5">
+              BDT {stats.partialCollectedAmount.toLocaleString()} collected
+            </p>
+          </div>
 
-            {/* Payment Method Quick Filter */}
-            <div className="flex items-center gap-1 border-l border-slate-200 pl-2">
-              <span className="text-xs font-bold text-slate-500">Method:</span>
-              {(['all', 'cash', 'bank', 'mobile_banking'] as const).map((method) => (
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-blue-700 uppercase">Received Slips</span>
+              <FileCheck className="h-4 w-4 text-blue-600" />
+            </div>
+            <p className="text-xl font-extrabold text-blue-800 mt-1.5">
+              {stats.currentReceivedCount}
+            </p>
+            <p className="text-[11px] font-mono text-blue-700 mt-0.5">
+              BDT {stats.receivedSlipsAmount.toLocaleString()} in review
+            </p>
+          </div>
+
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-amber-700 uppercase">Due Pending</span>
+              <Clock className="h-4 w-4 text-amber-600" />
+            </div>
+            <p className="text-xl font-extrabold text-amber-800 mt-1.5">
+              {stats.currentDueCount}
+            </p>
+            <p className="text-[11px] font-mono text-amber-700 mt-0.5">
+              BDT {stats.duePendingAmount.toLocaleString()} pending
+            </p>
+          </div>
+
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs col-span-2 lg:col-span-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-red-700 uppercase">Rejected Slips</span>
+              <XCircle className="h-4 w-4 text-red-600" />
+            </div>
+            <p className="text-xl font-extrabold text-red-800 mt-1.5">
+              {stats.currentRejectedCount}
+            </p>
+            <p className="text-[11px] font-mono text-red-700 mt-0.5">
+              BDT {stats.rejectedSlipsAmount.toLocaleString()} declined
+            </p>
+          </div>
+        </div>
+
+        {/* Main Ledger Control & View Switcher */}
+        <div className="space-y-4">
+          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* View Mode Toggle */}
+              <div className="flex items-center bg-slate-100 p-1 rounded-lg">
                 <button
-                  key={method}
-                  onClick={() => setPaymentMethodFilter(method)}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded transition-all cursor-pointer capitalize ${
-                    paymentMethodFilter === method
-                      ? 'bg-slate-800 text-white'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  onClick={() => setActiveTab('created')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeTab === 'created'
+                      ? 'bg-white text-emerald-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  {method === 'all' ? 'All' : method.replace(/_/g, ' ')}
+                  <ReceiptIcon className="h-3.5 w-3.5 text-emerald-700" />
+                  Demand Batches Created ({createdDemandGroups.length})
                 </button>
-              ))}
+                <button
+                  onClick={() => setActiveTab('members')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeTab === 'members'
+                      ? 'bg-white text-emerald-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Users className="h-3.5 w-3.5 text-emerald-700" />
+                  Member Folders ({stats.totalMembers})
+                </button>
+                <button
+                  onClick={() => setActiveTab('all')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeTab === 'all'
+                      ? 'bg-white text-emerald-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <ReceiptIcon className="h-3.5 w-3.5 text-emerald-700" />
+                  All Records Table ({allChronologicalItems.length})
+                </button>
+              </div>
+
+              {/* Status Quick Filter Buttons */}
+              <div className="flex items-center gap-1 border-l border-slate-200 pl-2 flex-wrap">
+                <button
+                  onClick={() => setStatusFilter('all')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                    statusFilter === 'all'
+                      ? 'bg-slate-800 text-white shadow-2xs'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  All
+                </button>
+                <button
+                  onClick={() => setStatusFilter('paid')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1 ${
+                    statusFilter === 'paid'
+                      ? 'bg-emerald-700 text-white shadow-2xs'
+                      : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                  }`}
+                >
+                  <CheckCircle2 className="h-3 w-3" /> Cleared
+                </button>
+                <button
+                  onClick={() => setStatusFilter('partial')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1 ${
+                    statusFilter === 'partial'
+                      ? 'bg-purple-700 text-white shadow-2xs'
+                      : 'bg-purple-50 text-purple-800 hover:bg-purple-100'
+                  }`}
+                >
+                  <Wallet className="h-3 w-3" /> Partial
+                </button>
+                <button
+                  onClick={() => setStatusFilter('received_slip')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1 ${
+                    statusFilter === 'received_slip'
+                      ? 'bg-blue-700 text-white shadow-2xs'
+                      : 'bg-blue-50 text-blue-800 hover:bg-blue-100'
+                  }`}
+                >
+                  <FileCheck className="h-3 w-3" /> Slips ({stats.currentReceivedCount})
+                </button>
+                <button
+                  onClick={() => setStatusFilter('pending')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1 ${
+                    statusFilter === 'pending'
+                      ? 'bg-amber-600 text-white shadow-2xs'
+                      : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
+                  }`}
+                >
+                  <Clock className="h-3 w-3" /> Dues ({stats.pureUnpaidDueCount})
+                </button>
+                <button
+                  onClick={() => setStatusFilter('rejected')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1 ${
+                    statusFilter === 'rejected'
+                      ? 'bg-red-700 text-white shadow-2xs'
+                      : 'bg-red-50 text-red-800 hover:bg-red-100'
+                  }`}
+                >
+                  <XCircle className="h-3 w-3" /> Rejected
+                </button>
+              </div>
+            </div>
+
+            {/* Search & Method Filter */}
+            <div className="flex items-center gap-2">
+              <div className="relative w-full sm:w-64">
+                <Search className="h-4 w-4 absolute left-3 top-2.5 text-slate-400" />
+                <Input
+                  placeholder="Search name, ID, receipt, trx#..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9 bg-slate-50 text-xs h-9"
+                />
+              </div>
+
+              <select
+                value={paymentMethodFilter}
+                onChange={(e) => setPaymentMethodFilter(e.target.value as any)}
+                className="border border-slate-200 rounded-md px-2 py-1.5 text-xs bg-slate-50 text-slate-700 font-medium h-9"
+              >
+                <option value="all">All Methods</option>
+                <option value="cash">Cash</option>
+                <option value="bank">Bank</option>
+                <option value="mobile_banking">Mobile Banking</option>
+                <option value="other">Other</option>
+              </select>
             </div>
           </div>
 
-          {/* Search Input */}
-          <div className="relative w-full lg:w-80">
-            <Search className="h-4 w-4 absolute left-3 top-2.5 text-slate-400" />
-            <Input
-              placeholder="Search member, ID, receipt no, reason..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 bg-slate-50 text-xs h-9"
-            />
-          </div>
-        </div>
+          {/* VIEW 1: CREATED DEMAND BATCHES */}
+          {activeTab === 'created' && (
+            <div className="space-y-4">
+              <Card className="border-slate-200 shadow-xs overflow-hidden">
+                <CardHeader className="bg-slate-50/50 p-4 border-b border-slate-200">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="text-base font-bold text-slate-900">
+                        Society Billing Demands &amp; Campaign Ledger
+                      </CardTitle>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Track progress, edit fees, and inspect submitted receipt slips for each created billing demand.
+                      </p>
+                    </div>
+                    <Badge variant="outline" className="text-xs font-semibold">
+                      {filteredCreatedGroups.length} Billing Batches
+                    </Badge>
+                  </div>
+                </CardHeader>
 
-        {/* VIEW 1: CREATED DEMAND BATCHES (ALL MEMBERS COLLAPSED UNDER THE TRANSACTION CREATED) */}
-        {activeTab === 'created' && (
-          <div className="space-y-4">
-            <Card className="border-slate-200 shadow-xs bg-white">
-              <CardHeader className="p-4 border-b border-slate-100 flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
-                    <ReceiptIcon className="h-5 w-5 text-emerald-700" />
-                    <span>Transactions Created &amp; Assigned Billing ({filteredCreatedGroups.length})</span>
-                  </CardTitle>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Click any transaction demand campaign to expand and view individual member billing receipts, payment slips, and verification actions.
-                  </p>
-                </div>
-              </CardHeader>
-
-              <CardContent className="p-0">
-                <Table className="table-fixed w-full">
-                  <TableHeader className="bg-slate-50/80">
-                    <TableRow className="text-xs font-bold text-slate-700">
-                      <TableHead className="w-[24%] px-3">Transaction / Batch Name</TableHead>
-                      <TableHead className="w-[16%] px-3">Created / Modified By</TableHead>
-                      <TableHead className="w-[26%] px-3">Member Receipts &amp; Dues</TableHead>
-                      <TableHead className="w-[12%] px-3">Status</TableHead>
-                      <TableHead className="w-[11%] px-3">Due Date</TableHead>
-                      <TableHead className="w-[11%] px-3 text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-
-                  <TableBody>
-                    {filteredCreatedGroups.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={6} className="text-center py-12 text-slate-500">
-                          <ReceiptIcon className="h-8 w-8 mx-auto text-slate-300 mb-2" />
-                          No created transactions found matching your filters.
-                        </TableCell>
+                <CardContent className="p-0">
+                  <Table className="table-fixed w-full">
+                    <TableHeader className="bg-slate-50/80">
+                      <TableRow className="text-xs font-bold text-slate-700">
+                        <TableHead className="w-[24%] px-3">Transaction / Batch Name</TableHead>
+                        <TableHead className="w-[16%] px-3">Created / Modified By</TableHead>
+                        <TableHead className="w-[26%] px-3">Member Receipts &amp; Dues</TableHead>
+                        <TableHead className="w-[12%] px-3">Status</TableHead>
+                        <TableHead className="w-[11%] px-3">Due Date</TableHead>
+                        <TableHead className="w-[11%] px-3 text-right">Actions</TableHead>
                       </TableRow>
-                    )}
+                    </TableHeader>
 
-                    {filteredCreatedGroups.map((group) => {
-                      const isExpanded = !!expandedGroups[group.key];
-                      const modifier = getModifierInfo(group);
-                      const displayDate = group.dueDate;
+                    <TableBody>
+                      {filteredCreatedGroups.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-center py-12 text-slate-500">
+                            <ReceiptIcon className="h-8 w-8 mx-auto text-slate-300 mb-2" />
+                            No created transactions found matching your filters.
+                          </TableCell>
+                        </TableRow>
+                      )}
 
-                      return (
-                        <React.Fragment key={group.key}>
-                          <TableRow className="hover:bg-slate-50/70 transition-colors">
-                            <TableCell className="px-3 py-3.5">
-                              <div className="flex flex-col">
-                                <span className="font-bold text-slate-900 text-sm truncate" title={group.title}>
-                                  {group.title}
-                                </span>
-                                <div className="flex items-center gap-1.5 mt-0.5">
-                                  <Badge variant="outline" className="capitalize text-[10px] font-semibold">
-                                    {group.category.replace(/_/g, ' ')}
-                                  </Badge>
-                                  <span className="text-[11px] text-slate-500">
-                                    BDT {group.perMemberAmount.toLocaleString()} / member
+                      {filteredCreatedGroups.map((group) => {
+                        const isExpanded = !!expandedGroups[group.key];
+                        const modifier = getModifierInfo(group);
+                        const displayDate = group.dueDate;
+
+                        return (
+                          <React.Fragment key={group.key}>
+                            <TableRow className="hover:bg-slate-50/70 transition-colors">
+                              <TableCell className="px-3 py-3.5">
+                                <div className="flex flex-col">
+                                  <span className="font-bold text-slate-900 text-sm truncate" title={group.title}>
+                                    {group.title}
                                   </span>
-                                </div>
-                              </div>
-                            </TableCell>
-
-                            <TableCell className="px-3 py-3.5">
-                              <div className="flex flex-col">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="font-bold text-slate-800 text-xs truncate">{modifier.name}</span>
-                                  <Badge
-                                    variant="outline"
-                                    className={`text-[9px] px-1 py-0 capitalize ${
-                                      modifier.role === 'super_admin'
-                                        ? 'bg-purple-50 text-purple-800 border-purple-200'
-                                        : 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                    }`}
-                                  >
-                                    {modifier.role?.replace(/_/g, ' ')}
-                                  </Badge>
-                                </div>
-                                <span className="text-[10px] text-slate-500">
-                                  {modifier.action} entry
-                                </span>
-                              </div>
-                            </TableCell>
-
-                            <TableCell className="px-3 py-3.5">
-                              <div className="space-y-1 max-w-xs">
-                                <div className="flex items-center justify-between text-xs">
-                                  <span className="font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
-                                    <Users className="h-3 w-3 text-slate-500 inline" />
-                                    <span>{group.paidCount} / {group.totalMembersAssigned} Cleared</span>
-                                    {group.partiallyPaidCount > 0 && (
-                                      <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
-                                        {group.partiallyPaidCount} Partial
+                                  <div className="flex items-center gap-1.5 mt-0.5">
+                                    <Badge variant="outline" className="capitalize text-[10px] font-semibold">
+                                      {group.category.replace(/_/g, ' ')}
+                                    </Badge>
+                                    {(group.transaction_no || group.id) && (
+                                      <span className="text-[11px] font-mono text-slate-500">
+                                        #{group.transaction_no || group.id}
                                       </span>
                                     )}
+                                  </div>
+                                </div>
+                              </TableCell>
+
+                              <TableCell className="px-3 py-3.5">
+                                <div className="flex flex-col">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-bold text-slate-800 text-xs truncate">{modifier.name}</span>
+                                    <Badge
+                                      variant="outline"
+                                      className={`text-[9px] px-1 py-0 capitalize ${
+                                        modifier.role === 'super_admin'
+                                          ? 'bg-purple-50 text-purple-800 border-purple-200'
+                                          : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                      }`}
+                                    >
+                                      {modifier.role?.replace(/_/g, ' ')}
+                                    </Badge>
+                                  </div>
+                                  <span className="text-[10px] text-slate-500">
+                                    {modifier.action} entry
                                   </span>
-                                  <span className={`font-bold text-[11px] ${
-                                    group.isFullyPaid ? 'text-emerald-700' : 'text-amber-800'
-                                  }`}>
-                                    {group.memberProgressPercent}%
-                                  </span>
                                 </div>
+                              </TableCell>
 
-                                <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden flex border border-slate-200 shadow-inner">
-                                  <div
-                                    className={`h-full transition-all duration-500 ${
-                                      group.isFullyPaid
-                                        ? 'bg-gradient-to-r from-emerald-600 to-emerald-500'
-                                        : 'bg-gradient-to-r from-emerald-600 to-teal-500'
-                                    }`}
-                                    style={{ width: `${group.memberProgressPercent}%` }}
-                                  />
-                                  {!group.isFullyPaid && (
-                                    <div
-                                      className="bg-amber-200 h-full transition-all duration-500"
-                                      style={{ width: `${100 - group.memberProgressPercent}%` }}
-                                    />
-                                  )}
-                                </div>
-
-                                <div className="text-[10px] text-slate-500 flex justify-between">
-                                  <span>Collected: BDT {group.totalCollectedAmount.toLocaleString()}</span>
-                                  <span>Target: BDT {group.totalDemandAmount.toLocaleString()}</span>
-                                </div>
-                              </div>
-                            </TableCell>
-
-                            <TableCell className="px-3 py-3.5">
-                              {group.isFullyPaid ? (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 shadow-2xs">
-                                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                                  Complete
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
-                                  <Clock className="h-3.5 w-3.5 text-amber-600" />
-                                  Pending ({group.pendingCount} Unpaid)
-                                </span>
-                              )}
-                            </TableCell>
-
-                            <TableCell className="px-3 py-3.5 text-xs text-slate-600 font-medium whitespace-nowrap">
-                              {displayDate}
-                            </TableCell>
-
-                            <TableCell className="px-3 py-3.5 text-right whitespace-nowrap">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => toggleExpandGroup(group.key)}
-                                className="h-8 text-xs cursor-pointer border-slate-200 hover:bg-slate-100"
-                              >
-                                {isExpanded ? 'Hide' : 'View Details'} ({group.totalMembersAssigned})
-                                {isExpanded ? <ChevronUp className="h-3.5 w-3.5 ml-1" /> : <ChevronDown className="h-3.5 w-3.5 ml-1" />}
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-
-                          {/* Expandable Members Sub-Table under Created Transaction */}
-                          {isExpanded && (
-                            <TableRow className="bg-slate-50/90 hover:bg-slate-50/90">
-                              <TableCell colSpan={6} className="p-4">
-                                <div className="space-y-3 bg-white rounded-xl border border-slate-200 p-4 shadow-2xs">
-                                  <div className="flex items-center justify-between flex-wrap gap-2">
-                                    <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
-                                      <Users className="h-4 w-4 text-emerald-700" />
-                                      Assigned Members &amp; Receipts for {group.title}
-                                    </h4>
-                                    <div className="flex items-center gap-2 text-xs">
-                                      <span className="text-emerald-700 font-bold">{group.paidCount} Cleared</span>
+                              <TableCell className="px-3 py-3.5">
+                                <div className="space-y-1 max-w-xs">
+                                  <div className="flex items-center justify-between text-xs">
+                                    <span className="font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
+                                      <Users className="h-3 w-3 text-slate-500 inline" />
+                                      <span>{group.paidCount} / {group.totalMembersAssigned} Cleared</span>
                                       {group.partiallyPaidCount > 0 && (
-                                        <span className="text-purple-700 font-bold border-l border-slate-300 pl-2">{group.partiallyPaidCount} Partially Paid</span>
+                                        <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
+                                          {group.partiallyPaidCount} Partial
+                                        </span>
                                       )}
-                                      <span className="text-amber-700 font-bold border-l border-slate-300 pl-2">{group.pendingCount} Dues Remaining</span>
-                                    </div>
+                                    </span>
+                                    <span className={`font-bold text-[11px] ${
+                                      group.isFullyPaid ? 'text-emerald-700' : 'text-amber-800'
+                                    }`}>
+                                      {group.memberProgressPercent}%
+                                    </span>
                                   </div>
 
-                                  <div className="border border-slate-100 rounded-lg overflow-x-auto">
-                                    <Table className="table-fixed w-full min-w-[1000px]">
-                                      <TableHeader className="bg-slate-50">
-                                        <TableRow className="text-xs">
-                                          <TableHead className="w-[16%] text-center">Member Name</TableHead>
-                                          <TableHead className="w-[12%] text-center">Member ID</TableHead>
-                                          <TableHead className="w-[12%] text-center">Date</TableHead>
-                                          <TableHead className="w-[14%] text-center">Receipt / Trx No</TableHead>
-                                          <TableHead className="w-[14%] text-center">Amount</TableHead>
-                                          <TableHead className="w-[14%] text-center">Receipt Proof</TableHead>
-                                          <TableHead className="w-[18%] text-center">Status</TableHead>
-                                        </TableRow>
-                                      </TableHeader>
+                                  <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden flex border border-slate-200 shadow-inner">
+                                    <div
+                                      className={`h-full transition-all duration-500 ${
+                                        group.isFullyPaid
+                                          ? 'bg-gradient-to-r from-emerald-600 to-emerald-500'
+                                          : 'bg-gradient-to-r from-emerald-600 to-teal-500'
+                                      }`}
+                                      style={{ width: `${group.memberProgressPercent}%` }}
+                                    />
+                                    {!group.isFullyPaid && (
+                                      <div
+                                        className="bg-amber-200 h-full transition-all duration-500"
+                                        style={{ width: `${100 - group.memberProgressPercent}%` }}
+                                      />
+                                    )}
+                                  </div>
+
+                                  <div className="flex items-center justify-between text-[11px] pt-0.5">
+                                    <span className="text-emerald-700 font-bold">
+                                      Collected: BDT {group.totalCollectedAmount.toLocaleString()}
+                                    </span>
+                                    <span className="text-slate-600 font-semibold">
+                                      Target: BDT {group.totalDemandAmount.toLocaleString()}
+                                    </span>
+                                  </div>
+
+                                  {/* 5 Status Counters in their own distinct theme colors */}
+                                  <div className="flex items-center gap-1 flex-wrap pt-1 border-t border-slate-200/80 text-[10px] font-bold">
+                                    <span
+                                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border transition-colors ${
+                                        group.paidCount > 0
+                                          ? 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-2xs'
+                                          : 'bg-slate-50 text-slate-400 border-slate-200'
+                                      }`}
+                                      title="Fully Paid / Cleared Members"
+                                    >
+                                      <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                                      {group.paidCount} Cleared
+                                    </span>
+
+                                    <span
+                                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border transition-colors ${
+                                        group.partiallyPaidCount > 0
+                                          ? 'bg-purple-50 text-purple-800 border-purple-300 shadow-2xs'
+                                          : 'bg-slate-50 text-slate-400 border-slate-200'
+                                      }`}
+                                      title="Partially Paid Members"
+                                    >
+                                      <Wallet className="h-3 w-3 text-purple-600" />
+                                      {group.partiallyPaidCount} Partial
+                                    </span>
+
+                                    <span
+                                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border transition-colors ${
+                                        group.receivedSlipCount > 0
+                                          ? 'bg-blue-50 text-blue-800 border-blue-300 shadow-2xs'
+                                          : 'bg-slate-50 text-slate-400 border-slate-200'
+                                      }`}
+                                      title="Payment Slip Received (Awaiting Confirmation)"
+                                    >
+                                      <FileCheck className="h-3 w-3 text-blue-600" />
+                                      {group.receivedSlipCount} Received
+                                    </span>
+
+                                    <span
+                                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border transition-colors ${
+                                        group.duePendingCount > 0
+                                          ? 'bg-amber-50 text-amber-900 border-amber-300 shadow-2xs'
+                                          : 'bg-slate-50 text-slate-400 border-slate-200'
+                                      }`}
+                                      title="Pending Unpaid Dues"
+                                    >
+                                      <Clock className="h-3 w-3 text-amber-600" />
+                                      {group.duePendingCount} Due
+                                    </span>
+
+                                    <span
+                                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border transition-colors ${
+                                        group.rejectedCount > 0
+                                          ? 'bg-red-50 text-red-800 border-red-300 shadow-2xs'
+                                          : 'bg-slate-50 text-slate-400 border-slate-200'
+                                      }`}
+                                      title="Rejected Proof Slips"
+                                    >
+                                      <XCircle className="h-3 w-3 text-red-600" />
+                                      {group.rejectedCount} Rejected
+                                    </span>
+                                  </div>
+                                </div>
+                              </TableCell>
+
+                              <TableCell className="px-3 py-3.5">
+                                {group.isFullyPaid ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 shadow-2xs">
+                                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                                    Complete
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
+                                    <Clock className="h-3.5 w-3.5 text-amber-600" />
+                                    Pending ({group.pendingCount} Unpaid)
+                                  </span>
+                                )}
+                              </TableCell>
+
+                              <TableCell className="px-3 py-3.5 text-xs text-slate-600 font-medium whitespace-nowrap">
+                                {displayDate}
+                              </TableCell>
+
+                              <TableCell className="px-3 py-3.5 text-right whitespace-nowrap">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  {canManage && (
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => openEditBatchGroup(group)}
+                                        className="h-8 px-2 text-xs cursor-pointer border-slate-200 text-slate-700 hover:bg-slate-100 hover:text-slate-900"
+                                        title="Edit demand price for assigned members"
+                                      >
+                                        <Edit2 className="h-3.5 w-3.5 mr-1 text-slate-500" />
+                                        Edit Price
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() => promptDeleteGroup(group)}
+                                        className="h-8 px-2 text-xs cursor-pointer border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800"
+                                        title="Delete this demand and all assigned member records"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5 text-red-600" />
+                                      </Button>
+                                    </>
+                                  )}
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => toggleExpandGroup(group.key)}
+                                    className="h-8 text-xs cursor-pointer border-slate-200 hover:bg-slate-100"
+                                  >
+                                    {isExpanded ? 'Hide' : 'View Details'} ({group.totalMembersAssigned})
+                                    {isExpanded ? <ChevronUp className="h-3.5 w-3.5 ml-1" /> : <ChevronDown className="h-3.5 w-3.5 ml-1" />}
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+
+                            {/* Expandable Members Sub-Table under Created Transaction */}
+                            {isExpanded && (
+                              <TableRow className="bg-slate-50/90 hover:bg-slate-50/90">
+                                <TableCell colSpan={6} className="p-4">
+                                  <div className="space-y-3 bg-white rounded-xl border border-slate-200 p-4 shadow-2xs">
+                                    <div className="flex items-center justify-between flex-wrap gap-2">
+                                      <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                                        <Users className="h-4 w-4 text-emerald-700" />
+                                        Assigned Members &amp; Receipts for {group.title}
+                                      </h4>
+                                      <div className="flex items-center gap-2 text-xs">
+                                        <span className="text-emerald-700 font-bold">{group.paidCount} Cleared</span>
+                                        {group.partiallyPaidCount > 0 && (
+                                          <span className="text-purple-700 font-bold border-l border-slate-300 pl-2">{group.partiallyPaidCount} Partially Paid</span>
+                                        )}
+                                        <span className="text-amber-700 font-bold border-l border-slate-300 pl-2">{group.pendingCount} Dues Remaining</span>
+                                      </div>
+                                    </div>
+
+                                    <div className="border border-slate-100 rounded-lg overflow-x-auto">
+                                      <Table className="table-fixed w-full min-w-[1000px]">
+                                        <TableHeader className="bg-slate-50">
+                                          <TableRow className="text-xs">
+                                            <TableHead className="w-[14%] text-center">Member Name</TableHead>
+                                            <TableHead className="w-[10%] text-center">Member ID</TableHead>
+                                            <TableHead className="w-[10%] text-center">Date</TableHead>
+                                            <TableHead className="w-[14%] text-center">Receipt / Trx No</TableHead>
+                                            <TableHead className="w-[12%] text-center">Amount</TableHead>
+                                            <TableHead className="w-[12%] text-center">Receipt Proof</TableHead>
+                                            <TableHead className="w-[12%] text-center">Status</TableHead>
+                                            <TableHead className="w-[16%] text-center">Actions</TableHead>
+                                          </TableRow>
+                                        </TableHeader>
                                         <TableBody>
                                           {(() => {
                                             const memberTrxMap: Record<string | number, Transaction[]> = {};
@@ -1522,9 +2045,8 @@ export default function AdminReceiptsPage() {
                                                 const hasMatchingTrx = mGroup.transactions.some((t) => {
                                                   return (
                                                     (t.transaction_no || '').toLowerCase().includes(q) ||
-                                                    (t.receipt?.receipt_no || '').toLowerCase().includes(q) ||
-                                                    (t.rejection_reason || '').toLowerCase().includes(q) ||
-                                                    (t.description || '').toLowerCase().includes(q)
+                                                    (t.description || '').toLowerCase().includes(q) ||
+                                                    (t.month || '').toLowerCase().includes(q)
                                                   );
                                                 });
                                                 if (!nameMatch && !noMatch && !hasMatchingTrx) return false;
@@ -1537,194 +2059,180 @@ export default function AdminReceiptsPage() {
                                             return memberRows.map((mGroup) => {
                                               const expandKey = `${group.key}___mem_${mGroup.memberId}`;
                                               const isExpanded = !!expandedGroups[expandKey];
-                                              const historyCount = mGroup.transactions.length;
-
-                                              const primaryLinkedReceipt = rawReceipts.find(
-                                                (r) => r.transaction?.id === mGroup.primaryTrx.id || (r as any).transaction_id === mGroup.primaryTrx.id || (mGroup.primaryTrx.receipt && r.id === mGroup.primaryTrx.receipt.id)
-                                              ) || mGroup.primaryTrx.receipt;
 
                                               return (
-                                                <React.Fragment key={mGroup.memberId}>
-                                                  {/* MAIN SUMMARY ROW */}
-                                                  <TableRow className={`text-xs hover:bg-slate-50/80 transition-colors ${isExpanded ? 'bg-emerald-50/20' : ''}`}>
-                                                    <TableCell className="p-3 align-middle text-center font-bold text-slate-900 truncate" title={mGroup.memberName}>
+                                                <React.Fragment key={expandKey}>
+                                                  <TableRow className="text-xs hover:bg-slate-50/80">
+                                                    <TableCell className="p-3 align-middle text-center font-semibold text-slate-900">
                                                       <div className="flex items-center justify-center gap-1.5">
                                                         <span>{mGroup.memberName}</span>
-                                                        {historyCount > 1 && (
-                                                          <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-slate-100 text-slate-600 border border-slate-200">
-                                                            {historyCount}
-                                                          </span>
+                                                        {mGroup.transactions.length > 1 && (
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => toggleExpandGroup(expandKey)}
+                                                            className="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded cursor-pointer flex items-center gap-0.5 border border-slate-200"
+                                                          >
+                                                            <span>{mGroup.transactions.length} items</span>
+                                                            {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                                                          </button>
                                                         )}
                                                       </div>
                                                     </TableCell>
-                                                    <TableCell className="p-3 align-middle text-center font-mono text-slate-600">
+
+                                                    <TableCell className="p-3 align-middle text-center font-mono font-bold text-slate-700">
                                                       {mGroup.memberNo}
                                                     </TableCell>
-                                                    <TableCell className="p-3 align-middle text-center text-slate-600 font-medium whitespace-nowrap">
-                                                      {mGroup.primaryTrx.transaction_date || '-'}
+
+                                                    <TableCell className="p-3 align-middle text-center text-slate-600 whitespace-nowrap">
+                                                      {mGroup.primaryTrx.transaction_date}
                                                     </TableCell>
-                                                    <TableCell className="p-3 align-middle text-center font-mono text-slate-600">
-                                                      {primaryLinkedReceipt ? (
-                                                        <span className="font-semibold text-emerald-800">{primaryLinkedReceipt.receipt_no}</span>
-                                                      ) : (
-                                                        mGroup.primaryTrx.transaction_no
-                                                      )}
+
+                                                    <TableCell className="p-3 align-middle text-center font-mono font-bold text-slate-700">
+                                                      {mGroup.isRejectedActive || mGroup.currentBatchStatus === 'rejected'
+                                                        ? '-'
+                                                        : extractInputtedReference(mGroup.primaryTrx, mGroup.primaryTrx.receipt) || mGroup.primaryTrx.transaction_no || '-'}
                                                     </TableCell>
+
                                                     <TableCell className="p-3 align-middle text-center font-bold text-slate-900 whitespace-nowrap">
                                                       {mGroup.isPartial ? (
-                                                        <div className="flex flex-col items-center justify-center">
-                                                          <span className="font-bold text-purple-950">BDT {mGroup.totalDueAmount.toLocaleString()} <span className="text-[10px] text-amber-700 font-bold">(Due)</span></span>
-                                                          <span className="text-[10px] text-emerald-700 font-medium">Paid: BDT {mGroup.totalPaidAmount.toLocaleString()}</span>
+                                                        <div className="flex flex-col items-center">
+                                                          <span className="text-emerald-800 font-bold">
+                                                            Paid: BDT {mGroup.totalPaidAmount.toLocaleString()}
+                                                          </span>
+                                                          <span className="text-[10px] text-amber-700 font-bold">
+                                                            Due: BDT {mGroup.totalDueAmount.toLocaleString()}
+                                                          </span>
                                                         </div>
-                                                      ) : mGroup.isFullyPaid ? (
-                                                        <span>BDT {mGroup.totalPaidAmount.toLocaleString()}</span>
                                                       ) : (
-                                                        <span>BDT {mGroup.totalDueAmount.toLocaleString()}</span>
+                                                        <span>BDT {Number(mGroup.primaryTrx.amount).toLocaleString()}</span>
                                                       )}
                                                     </TableCell>
 
-                                                    {/* Receipt Photo & Proof */}
                                                     <TableCell className="p-3 align-middle text-center">
                                                       {mGroup.latestPhotoTrx?.receipt_photo ? (
-                                                        <div className="flex flex-col items-center justify-center gap-1">
+                                                        <div className="flex justify-center">
                                                           <ReceiptSlipThumbnail
                                                             photoUrl={mGroup.latestPhotoTrx.receipt_photo}
-                                                            title={`${mGroup.memberName} - ${mGroup.latestPhotoTrx.month || mGroup.latestPhotoTrx.description || 'Receipt'}`}
+                                                            title={`${mGroup.memberName} - ${group.title}`}
                                                             date={mGroup.latestPhotoTrx.receipt_photo_uploaded_at ? `Uploaded: ${mGroup.latestPhotoTrx.receipt_photo_uploaded_at}` : undefined}
-                                                            isRejected={mGroup.latestPhotoTrx.status === 'rejected'}
+                                                            isRejected={mGroup.isRejectedActive}
                                                             isPartial={mGroup.isPartial}
                                                             isSlipReceived={mGroup.isSlipReceived}
                                                             rejectionReason={mGroup.latestPhotoTrx.rejection_reason}
                                                             onClick={() => viewReceiptPhoto(
                                                               mGroup.latestPhotoTrx!.receipt_photo!,
-                                                              `${mGroup.memberName} - ${mGroup.latestPhotoTrx!.month || mGroup.latestPhotoTrx!.description || 'Receipt'}`,
+                                                              `${mGroup.memberName} - ${group.title}`,
                                                               mGroup.latestPhotoTrx!.receipt_photo_uploaded_at,
-                                                              mGroup.latestPhotoTrx!.status === 'rejected',
+                                                              mGroup.isRejectedActive,
                                                               mGroup.latestPhotoTrx!.rejection_reason
                                                             )}
                                                           />
-                                                          {mGroup.latestPhotoTrx.member_paid_amount && (
-                                                            <span className="text-[10px] font-semibold text-emerald-800 text-center">
-                                                              Proof: BDT {Number(mGroup.latestPhotoTrx.member_paid_amount).toLocaleString()}
-                                                              {mGroup.latestPhotoTrx.member_payment_method && <span className="capitalize text-slate-500 font-normal"> ({mGroup.latestPhotoTrx.member_payment_method.replace(/_/g, ' ')})</span>}
-                                                            </span>
-                                                          )}
                                                         </div>
                                                       ) : (
-                                                        <span className="text-[11px] text-slate-400 italic text-center block">No slip uploaded</span>
+                                                        <span className="text-[11px] text-slate-400 italic text-center block">
+                                                          No slip uploaded
+                                                        </span>
                                                       )}
                                                     </TableCell>
 
-                                                    {/* Status & Collapsible Actions */}
                                                     <TableCell className="p-3 align-middle text-center">
-                                                      <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                                                        {mGroup.currentBatchStatus === 'cleared' ? (
-                                                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 whitespace-nowrap shadow-2xs">
-                                                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> Paid
-                                                          </span>
-                                                        ) : mGroup.currentBatchStatus === 'partial' ? (
-                                                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-purple-50 text-purple-800 border border-purple-300 whitespace-nowrap shadow-2xs">
-                                                            <Wallet className="h-3.5 w-3.5 text-purple-600" /> Partially Paid
-                                                          </span>
-                                                        ) : mGroup.currentBatchStatus === 'received_slip' ? (
-                                                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-300 whitespace-nowrap shadow-2xs">
-                                                            <FileCheck className="h-3.5 w-3.5 text-blue-600" /> Received Slip
-                                                          </span>
-                                                        ) : mGroup.currentBatchStatus === 'rejected' ? (
-                                                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-red-50 text-red-800 border border-red-300 whitespace-nowrap shadow-2xs">
-                                                            <XCircle className="h-3.5 w-3.5 text-red-600" /> Slip Rejected
-                                                          </span>
-                                                        ) : (
-                                                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300 whitespace-nowrap shadow-2xs">
-                                                            <Clock className="h-3.5 w-3.5 text-amber-600" /> Due Pending
-                                                          </span>
-                                                        )}
+                                                      {mGroup.isFullyPaid ? (
+                                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 whitespace-nowrap shadow-2xs">
+                                                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> Paid
+                                                        </span>
+                                                      ) : mGroup.isPartial ? (
+                                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-purple-50 text-purple-800 border border-purple-300 whitespace-nowrap shadow-2xs">
+                                                          <Wallet className="h-3.5 w-3.5 text-purple-600" /> Partially Paid
+                                                        </span>
+                                                      ) : mGroup.isSlipReceived ? (
+                                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-300 whitespace-nowrap shadow-2xs">
+                                                          <FileCheck className="h-3.5 w-3.5 text-blue-600" /> Received Slip
+                                                        </span>
+                                                      ) : mGroup.isRejectedActive ? (
+                                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-red-50 text-red-800 border border-red-300 whitespace-nowrap shadow-2xs">
+                                                          <XCircle className="h-3.5 w-3.5 text-red-600" /> Slip Rejected
+                                                        </span>
+                                                      ) : (
+                                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300 whitespace-nowrap shadow-2xs">
+                                                          <Clock className="h-3.5 w-3.5 text-amber-600" /> Due Pending
+                                                        </span>
+                                                      )}
+                                                    </TableCell>
 
-                                                        {/* Primary Print / Settle */}
-                                                        {mGroup.isFullyPaid && (primaryLinkedReceipt || mGroup.primaryTrx) && (
+                                                    <TableCell className="p-3 align-middle text-center">
+                                                      <div className="flex items-center justify-center gap-1.5 flex-nowrap">
+                                                        {mGroup.isFullyPaid ? (
                                                           <Button
                                                             size="sm"
                                                             variant="outline"
-                                                            onClick={() => handlePrint(primaryLinkedReceipt, mGroup.primaryTrx, {
-                                                              isPartial: mGroup.isPartial,
-                                                              totalPaidAmount: mGroup.totalPaidAmount,
-                                                              totalDueAmount: mGroup.totalDueAmount,
-                                                            })}
-                                                            className="h-6 px-2 text-[10px] cursor-pointer border-slate-200 hover:bg-emerald-50 hover:text-emerald-800"
-                                                            title="Print official receipt"
+                                                            onClick={() => {
+                                                              const rootDemandTrx = mGroup.transactions.find((t) => !t.description || !/partial payment/i.test(t.description)) || mGroup.transactions[mGroup.transactions.length - 1] || mGroup.primaryTrx;
+                                                              const rootTrxNo = group.transaction_no || rootDemandTrx?.transaction_no || mGroup.primaryTrx?.transaction_no;
+                                                              handlePrint(mGroup.paidList[0]?.receipt, rootDemandTrx || mGroup.paidList[0], {
+                                                                isPartial: mGroup.isPartial,
+                                                                totalPaidAmount: mGroup.totalPaidAmount,
+                                                                totalDueAmount: mGroup.totalDueAmount,
+                                                                totalAssignedAmount: mGroup.totalPaidAmount + mGroup.totalDueAmount,
+                                                                demandTrxNo: rootTrxNo,
+                                                              });
+                                                            }}
+                                                            className="h-7 min-w-[68px] px-2 text-xs font-semibold border-emerald-300 text-emerald-800 hover:bg-emerald-50 cursor-pointer shadow-2xs flex items-center justify-center gap-1"
+                                                            title="Print receipt"
                                                           >
-                                                            <Printer className="h-3 w-3 mr-1" /> Print
+                                                            <Printer className="h-3.5 w-3.5" /> Print
                                                           </Button>
-                                                        )}
-
-                                                        {canManage && (mGroup.isPartial || !mGroup.isFullyPaid) && (
+                                                        ) : canManage ? (
                                                           <Button
                                                             size="sm"
-                                                            onClick={() => openCollectPaymentModal(mGroup.pendingList[0] || mGroup.primaryTrx)}
-                                                            className="h-6 px-2 text-[10px] bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer shadow-2xs"
-                                                            title="Collect payment and issue receipt"
+                                                            onClick={() => openCollectPaymentModal(mGroup.primaryTrx)}
+                                                            className="h-7 min-w-[68px] px-2 text-xs font-semibold bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer shadow-2xs flex items-center justify-center gap-1"
+                                                            title="Settle payment"
                                                           >
-                                                            <Wallet className="h-3 w-3 mr-1" /> Settle
+                                                            <Wallet className="h-3.5 w-3.5" /> Settle
+                                                          </Button>
+                                                        ) : null}
+
+                                                        {canManage && mGroup.latestPhotoTrx?.receipt_photo && !mGroup.isRejectedActive && !mGroup.isFullyPaid && (
+                                                          <Button
+                                                            size="sm"
+                                                            variant="outline"
+                                                            onClick={() => openRejectProofModal(mGroup.primaryTrx)}
+                                                            className="h-7 w-7 p-0 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 cursor-pointer shadow-2xs flex items-center justify-center"
+                                                            title="Reject slip"
+                                                          >
+                                                            <XCircle className="h-3.5 w-3.5" />
                                                           </Button>
                                                         )}
-
-                                                        {/* Expand / Collapse Toggle Button */}
-                                                        <Button
-                                                          size="sm"
-                                                          variant="ghost"
-                                                          onClick={() => toggleExpandGroup(expandKey)}
-                                                          className="h-6 px-1.5 text-[10px] text-slate-600 hover:bg-slate-100 hover:text-slate-900 cursor-pointer"
-                                                          title={isExpanded ? 'Collapse member payment history' : 'Expand member payment history'}
-                                                        >
-                                                          {isExpanded ? (
-                                                            <span className="flex items-center gap-0.5 font-bold text-emerald-800">
-                                                              Hide <ChevronUp className="h-3 w-3" />
-                                                            </span>
-                                                          ) : (
-                                                            <span className="flex items-center gap-0.5">
-                                                              History ({historyCount}) <ChevronDown className="h-3 w-3" />
-                                                            </span>
-                                                          )}
-                                                        </Button>
                                                       </div>
                                                     </TableCell>
                                                   </TableRow>
 
-                                                  {/* EXPANDABLE MEMBER HISTORY SUB-ROW */}
+                                                  {/* Nested Sub-History for Member Multiple Installments */}
                                                   {isExpanded && (
-                                                    <TableRow className="bg-slate-50/90 border-t border-b border-emerald-100">
-                                                      <TableCell colSpan={7} className="p-3 pl-8">
-                                                        <div className="space-y-2 bg-white rounded-lg p-3 border border-slate-200 shadow-2xs">
-                                                          <div className="flex items-center justify-between">
-                                                            <h5 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                                                              <Users className="h-3.5 w-3.5 text-emerald-700" />
-                                                              Payment & Slip History for {mGroup.memberName} ({mGroup.memberNo})
-                                                            </h5>
-                                                            <span className="text-[11px] text-slate-500 font-medium">
-                                                              Total Paid: <strong className="text-emerald-700">BDT {mGroup.totalPaidAmount.toLocaleString()}</strong>
-                                                              {mGroup.totalDueAmount > 0 && (
-                                                                <> • Remaining Due: <strong className="text-purple-800">BDT {mGroup.totalDueAmount.toLocaleString()}</strong></>
-                                                              )}
-                                                            </span>
-                                                          </div>
-
-                                                          <div className="overflow-x-auto rounded border border-slate-100">
-                                                            <Table className="table-fixed w-full min-w-[700px]">
-                                                              <TableHeader className="bg-slate-50/80">
-                                                                <TableRow className="text-[11px]">
-                                                                  <TableHead className="w-[18%] text-center">Receipt / Trx No</TableHead>
-                                                                  <TableHead className="w-[18%] text-center">Type / Description</TableHead>
-                                                                  <TableHead className="w-[12%] text-center">Date</TableHead>
-                                                                  <TableHead className="w-[14%] text-center">Amount</TableHead>
-                                                                  <TableHead className="w-[16%] text-center">Proof Slip</TableHead>
-                                                                  <TableHead className="w-[12%] text-center">Status</TableHead>
-                                                                  <TableHead className="w-[10%] text-center">Action</TableHead>
+                                                    <TableRow className="bg-slate-50/90 hover:bg-slate-50/90">
+                                                      <TableCell colSpan={8} className="p-3">
+                                                        <div className="space-y-2 bg-white rounded-lg border border-slate-200 p-3 shadow-inner">
+                                                          <span className="font-bold text-slate-800 text-[11px] flex items-center gap-1">
+                                                            <Clock className="h-3.5 w-3.5 text-emerald-700" />
+                                                            Full Payment Progression History for {mGroup.memberName}
+                                                          </span>
+                                                          <div className="border border-slate-200 rounded overflow-hidden">
+                                                            <Table>
+                                                              <TableHeader className="bg-slate-100 text-[10px]">
+                                                                <TableRow>
+                                                                  <TableHead className="p-2 text-center">Ref / Trx No</TableHead>
+                                                                  <TableHead className="p-2 text-center">Item</TableHead>
+                                                                  <TableHead className="p-2 text-center">Date</TableHead>
+                                                                  <TableHead className="p-2 text-center">Amount</TableHead>
+                                                                  <TableHead className="p-2 text-center">Proof</TableHead>
+                                                                  <TableHead className="p-2 text-center">Status</TableHead>
+                                                                  <TableHead className="p-2 text-center">Actions</TableHead>
                                                                 </TableRow>
                                                               </TableHeader>
                                                               <TableBody>
-                                                                {mGroup.transactions.map((histTrx: any) => {
-                                                                  const isHistRemainingDue = (histTrx.description && /remaining due/i.test(histTrx.description)) || (histTrx.description && /partial payment/i.test(histTrx.description));
-                                                                  const isHistPartialPaid = histTrx.status === 'paid' && (histTrx.description && (/partial payment/i.test(histTrx.description) || /remaining due/i.test(histTrx.description)));
+                                                                {mGroup.transactions.map((histTrx) => {
+                                                                  const isHistPartialPaid = Boolean(histTrx.description && (/partial payment/i.test(histTrx.description) || /remaining due/i.test(histTrx.description)));
+                                                                  const isHistRemainingDue = Boolean(histTrx.description && /remaining due/i.test(histTrx.description));
                                                                   const isHistPaid = histTrx.status === 'paid';
                                                                   const isHistRejected = histTrx.status === 'rejected';
                                                                   const isHistSlipReceived = histTrx.status === 'pending' && !!histTrx.receipt_photo;
@@ -1736,15 +2244,10 @@ export default function AdminReceiptsPage() {
 
                                                                   return (
                                                                     <TableRow key={histTrx.id} className="text-xs hover:bg-slate-50">
-                                                                      <TableCell className="p-2 text-center font-mono text-[11px] text-slate-600">
-                                                                        {histLinkedReceipt ? (
-                                                                          <div className="flex flex-col items-center">
-                                                                            <span className="font-bold text-emerald-900">{histLinkedReceipt.receipt_no}</span>
-                                                                            <span className="text-[10px] text-slate-400">Trx: {histTrx.transaction_no}</span>
-                                                                          </div>
-                                                                        ) : (
-                                                                          histTrx.transaction_no
-                                                                        )}
+                                                                      <TableCell className="p-2 text-center font-mono text-[11px] text-slate-700 font-bold">
+                                                                        {isHistRejected || histTrx.status === 'rejected'
+                                                                          ? '-'
+                                                                          : extractInputtedReference(histTrx, histLinkedReceipt) || histTrx.transaction_no || '-'}
                                                                       </TableCell>
                                                                       <TableCell className="p-2 text-center font-medium text-slate-700">
                                                                         {histTrx.description || histTrx.month || 'Monthly Subscription'}
@@ -1819,79 +2322,83 @@ export default function AdminReceiptsPage() {
                                                                         )}
                                                                       </TableCell>
                                                                       <TableCell className="p-2 text-center">
-                                                                        {(histLinkedReceipt || isHistPaid) ? (
-                                                                          (() => {
-                                                                            // Calculate historical progression up to this transaction
-                                                                            const paidHistory = mGroup.transactions
-                                                                              .filter((t) => t.status === 'paid')
-                                                                              .sort((a, b) => {
-                                                                                const dateA = a.updated_at || a.created_at || a.transaction_date || '';
-                                                                                const dateB = b.updated_at || b.created_at || b.transaction_date || '';
-                                                                                return dateA.localeCompare(dateB) || (a.id || 0) - (b.id || 0);
-                                                                              });
+                                                                        <div className="flex items-center justify-center gap-1 flex-wrap">
+                                                                          {(histLinkedReceipt || isHistPaid) ? (
+                                                                            (() => {
+                                                                              const paidHistory = mGroup.transactions
+                                                                                .filter((t) => t.status === 'paid')
+                                                                                .sort((a, b) => {
+                                                                                  const dateA = a.updated_at || a.created_at || a.transaction_date || '';
+                                                                                  const dateB = b.updated_at || b.created_at || b.transaction_date || '';
+                                                                                  return dateA.localeCompare(dateB) || (a.id || 0) - (b.id || 0);
+                                                                                });
 
-                                                                            const currIndex = paidHistory.findIndex((t) => t.id === histTrx.id);
-                                                                            let cumulativeUpToThis = 0;
-                                                                            let prevUpToThis = 0;
-                                                                            if (currIndex >= 0) {
-                                                                              for (let i = 0; i <= currIndex; i++) {
-                                                                                cumulativeUpToThis += Number(paidHistory[i].amount || 0);
-                                                                                if (i < currIndex) {
-                                                                                  prevUpToThis += Number(paidHistory[i].amount || 0);
+                                                                              const currIndex = paidHistory.findIndex((t) => t.id === histTrx.id);
+                                                                              let cumulativeUpToThis = 0;
+                                                                              let prevUpToThis = 0;
+                                                                              if (currIndex >= 0) {
+                                                                                for (let i = 0; i <= currIndex; i++) {
+                                                                                  cumulativeUpToThis += Number(paidHistory[i].amount || 0);
+                                                                                  if (i < currIndex) {
+                                                                                    prevUpToThis += Number(paidHistory[i].amount || 0);
+                                                                                  }
                                                                                 }
+                                                                              } else {
+                                                                                cumulativeUpToThis = Number(histTrx.amount || 0);
                                                                               }
-                                                                            } else {
-                                                                              cumulativeUpToThis = Number(histTrx.amount || 0);
-                                                                            }
 
-                                                                            const totalTarget = mGroup.totalPaidAmount + mGroup.totalDueAmount;
-                                                                            const dueRemainingAfterThis = Math.max(0, totalTarget - cumulativeUpToThis);
+                                                                              const totalTarget = mGroup.totalPaidAmount + mGroup.totalDueAmount;
+                                                                              const dueRemainingAfterThis = Math.max(0, totalTarget - cumulativeUpToThis);
 
-                                                                            const prevTrxList = currIndex >= 0 ? paidHistory.slice(0, currIndex) : [];
-                                                                            const prevRefs = prevTrxList.map((t) => {
-                                                                              let ref = t.member_trx_reference || '';
-                                                                              if (!ref && t.description) {
-                                                                                const m = t.description.match(/Ref:\s*([^|\n-]+)/i);
-                                                                                if (m) ref = m[1].trim();
-                                                                              }
-                                                                              return {
-                                                                                ref: ref || t.transaction_no,
-                                                                                amount: Number(t.amount || 0),
-                                                                                date: t.transaction_date || '',
-                                                                              };
-                                                                            }).filter((item) => Boolean(item.ref));
+                                                                              const prevTrxList = currIndex >= 0 ? paidHistory.slice(0, currIndex) : [];
+                                                                              const prevRefs = prevTrxList.map((t) => {
+                                                                                let ref = t.member_trx_reference || '';
+                                                                                if (!ref && t.description) {
+                                                                                  const m = t.description.match(/Ref:\s*([^|\n-]+)/i);
+                                                                                  if (m) ref = m[1].trim();
+                                                                                }
+                                                                                return {
+                                                                                  ref: ref || t.transaction_no,
+                                                                                  amount: Number(t.amount || 0),
+                                                                                  date: t.transaction_date || '',
+                                                                                };
+                                                                              }).filter((item) => Boolean(item.ref));
 
-                                                                            return (
-                                                                              <Button
-                                                                                size="sm"
-                                                                                variant="outline"
-                                                                                onClick={() => handlePrint(histLinkedReceipt, histTrx, {
-                                                                                  isPartial: mGroup.isPartial || isHistPartialPaid,
-                                                                                  totalPaidAmount: cumulativeUpToThis,
-                                                                                  previousPaidAmount: prevUpToThis,
-                                                                                  totalDueAmount: dueRemainingAfterThis,
-                                                                                  totalAssignedAmount: totalTarget,
-                                                                                  previousReferences: prevRefs,
-                                                                                })}
-                                                                                className="h-6 px-1.5 text-[10px] cursor-pointer border-slate-200 hover:bg-emerald-50 hover:text-emerald-800"
-                                                                                title="Print receipt for this payment"
-                                                                              >
-                                                                                <Printer className="h-3 w-3 mr-1" /> Print
-                                                                              </Button>
-                                                                            );
-                                                                          })()
-                                                                        ) : canManage && (isHistPendingDue || isHistSlipReceived) ? (
-                                                                          <Button
-                                                                            size="sm"
-                                                                            onClick={() => openCollectPaymentModal(histTrx)}
-                                                                            className="h-6 px-1.5 text-[10px] bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer shadow-2xs"
-                                                                            title="Settle payment"
-                                                                          >
-                                                                            <Wallet className="h-3 w-3 mr-1" /> Settle
-                                                                          </Button>
-                                                                        ) : (
-                                                                          <span className="text-slate-300 text-xs">-</span>
-                                                                        )}
+                                                                              return (
+                                                                                <Button
+                                                                                  size="sm"
+                                                                                  variant="outline"
+                                                                                  onClick={() => {
+                                                                                    const rootDemandTrx = mGroup.transactions.find((t) => !t.description || !/partial payment/i.test(t.description)) || mGroup.transactions[mGroup.transactions.length - 1] || mGroup.primaryTrx;
+                                                                                    const rootTrxNo = group.transaction_no || rootDemandTrx?.transaction_no;
+                                                                                    handlePrint(histLinkedReceipt, histTrx, {
+                                                                                      isPartial: mGroup.isPartial || isHistPartialPaid,
+                                                                                      totalPaidAmount: cumulativeUpToThis,
+                                                                                      previousPaidAmount: prevUpToThis,
+                                                                                      totalDueAmount: dueRemainingAfterThis,
+                                                                                      totalAssignedAmount: totalTarget,
+                                                                                      previousReferences: prevRefs,
+                                                                                      demandTrxNo: rootTrxNo,
+                                                                                    });
+                                                                                  }}
+                                                                                  className="h-7 min-w-[68px] px-2 text-xs font-semibold border-emerald-300 text-emerald-800 hover:bg-emerald-50 cursor-pointer shadow-2xs flex items-center justify-center gap-1"
+                                                                                  title="Print receipt for this payment"
+                                                                                >
+                                                                                  <Printer className="h-3.5 w-3.5" /> Print
+                                                                                </Button>
+                                                                              );
+                                                                            })()
+                                                                          ) : canManage && (isHistPendingDue || isHistSlipReceived || isHistRejected) ? (
+                                                                            <Button
+                                                                              size="sm"
+                                                                              onClick={() => openCollectPaymentModal(histTrx)}
+                                                                              className="h-7 min-w-[68px] px-2 text-xs font-semibold bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer shadow-2xs flex items-center justify-center gap-1"
+                                                                              title="Settle payment"
+                                                                            >
+                                                                              <Wallet className="h-3.5 w-3.5" /> Settle
+                                                                            </Button>
+                                                                          ) : null}
+                                                                        </div>
                                                                       </TableCell>
                                                                     </TableRow>
                                                                   );
@@ -1908,665 +2415,1101 @@ export default function AdminReceiptsPage() {
                                             });
                                           })()}
                                         </TableBody>
-                                    </Table>
+                                      </Table>
+                                    </div>
                                   </div>
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          )}
-                        </React.Fragment>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          </div>
-        )}
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </div>
+          )}
 
-        {/* VIEW 2: MEMBER-WISE FOLDERS */}
-        {activeTab === 'members' && (
-          <div className="space-y-3">
-            {filteredMemberGroups.length === 0 ? (
-              <div className="p-12 text-center bg-white rounded-xl border border-slate-200 text-slate-500 text-sm">
-                <ReceiptIcon className="h-8 w-8 mx-auto text-slate-300 mb-2" />
-                No records found matching your filters.
-              </div>
-            ) : (
-              filteredMemberGroups.map((group) => {
-                const isExpanded = !!expandedMembers[group.memberId];
+          {/* VIEW 2: MEMBER-WISE FOLDERS */}
+          {activeTab === 'members' && (
+            <div className="space-y-3">
+              {filteredMemberGroups.length === 0 ? (
+                <div className="p-12 text-center bg-white rounded-xl border border-slate-200 text-slate-500 text-sm">
+                  <ReceiptIcon className="h-8 w-8 mx-auto text-slate-300 mb-2" />
+                  No records found matching your filters.
+                </div>
+              ) : (
+                filteredMemberGroups.map((group) => {
+                  const isExpanded = !!expandedMembers[group.memberId];
 
-                const displayItems = group.items.filter((it) => {
-                  if (statusFilter === 'paid' && (it.status !== 'paid' || it.isPartial)) return false;
-                  if (statusFilter === 'partial' && !it.isPartial) return false;
-                  if (statusFilter === 'received_slip' && (it.status !== 'pending' || !it.receiptPhoto)) return false;
-                  if (statusFilter === 'pending' && (it.status !== 'pending' || !!it.receiptPhoto || it.isPartial)) return false;
-                  if (statusFilter === 'rejected' && it.status !== 'rejected') return false;
-                  if (paymentMethodFilter !== 'all' && it.paymentMethod !== paymentMethodFilter) return false;
-                  return true;
-                });
+                  const displayItems = group.items.filter((it) => {
+                    if (statusFilter === 'paid' && (it.status !== 'paid' || it.isPartial)) return false;
+                    if (statusFilter === 'partial' && !it.isPartial) return false;
+                    if (statusFilter === 'received_slip' && (it.status !== 'pending' || !it.receiptPhoto)) return false;
+                    if (statusFilter === 'pending' && (it.status !== 'pending' || !!it.receiptPhoto || it.isPartial)) return false;
+                    if (statusFilter === 'rejected' && it.status !== 'rejected') return false;
+                    if (paymentMethodFilter !== 'all' && it.paymentMethod !== paymentMethodFilter) return false;
+                    return true;
+                  });
 
-                return (
-                  <div
-                    key={group.memberId}
-                    className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs transition-all hover:border-slate-300"
-                  >
-                    {/* Member Summary Header Bar */}
+                  return (
                     <div
-                      onClick={() => toggleExpandMember(group.memberId)}
-                      className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 cursor-pointer hover:bg-slate-50/80 transition-colors"
+                      key={group.memberId}
+                      className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs transition-all hover:border-slate-300"
                     >
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-sm shrink-0 border border-emerald-200">
-                          {group.memberName.slice(0, 2).toUpperCase()}
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <h3 className="font-bold text-slate-900 text-sm sm:text-base">
-                              {group.memberName}
-                            </h3>
-                            <span className="font-mono text-[11px] font-bold bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded border border-emerald-200">
-                              ID: {group.memberNo}
-                            </span>
-                            {group.fullyPaidCount > 0 && (
-                              <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-300 flex items-center gap-1">
-                                <CheckCircle2 className="h-3 w-3 text-emerald-600" />
-                                {group.fullyPaidCount === 1 ? '1 Cleared' : `${group.fullyPaidCount} Cleared`}
-                              </span>
-                            )}
-                            {group.partiallyPaidCount > 0 && (
-                              <span className="text-[10px] font-bold bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full border border-purple-300 flex items-center gap-1">
-                                <Wallet className="h-3 w-3 text-purple-600" />
-                                {group.partiallyPaidCount === 1 ? 'Partially Paid' : `${group.partiallyPaidCount} Partially Paid`}
-                              </span>
-                            )}
-                            {group.receivedSlipCount > 0 && (
-                              <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full border border-blue-200 flex items-center gap-1">
-                                <FileCheck className="h-3 w-3 text-blue-600" />
-                                {group.receivedSlipCount === 1 ? 'Received Slip' : `${group.receivedSlipCount} Received Slips`}
-                              </span>
-                            )}
-                            {group.pureDuePendingCount > 0 && (
-                              <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full border border-amber-200 flex items-center gap-1">
-                                <Clock className="h-3 w-3 text-amber-600" />
-                                {group.pureDuePendingCount === 1 ? 'Due Pending' : `${group.pureDuePendingCount} Due Pending`}
-                              </span>
-                            )}
-                            {group.rejectedCount > 0 && (
-                              <span className="text-[10px] font-bold bg-red-100 text-red-800 px-2 py-0.5 rounded-full border border-red-200 flex items-center gap-1">
-                                <XCircle className="h-3 w-3 text-red-600" />
-                                {group.rejectedCount} Slip Rejected
-                              </span>
-                            )}
+                      {/* Member Summary Header Bar */}
+                      <div
+                        onClick={() => toggleExpandMember(group.memberId)}
+                        className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 cursor-pointer hover:bg-slate-50/80 transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold text-sm shrink-0 border border-emerald-200">
+                            {group.memberName.slice(0, 2).toUpperCase()}
                           </div>
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            {group.fullyPaidCount === 0 && group.partiallyPaidCount > 0
-                              ? `${group.partiallyPaidCount} Partially Paid • Last Activity: ${group.lastDate || 'No records'}`
-                              : group.fullyPaidCount > 0 && group.partiallyPaidCount > 0
-                              ? `${group.fullyPaidCount} Cleared • ${group.partiallyPaidCount} Partially Paid • Last Activity: ${group.lastDate || 'No records'}`
-                              : `${group.fullyPaidCount} Cleared Receipt${group.fullyPaidCount !== 1 ? 's' : ''} • Last Activity: ${group.lastDate || 'No records'}`}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-4 self-end sm:self-auto">
-                        <div className="text-right">
-                          <span className="text-[10px] uppercase font-bold text-slate-400 block">
-                            Total Collected
-                          </span>
-                          <span className="text-sm font-bold text-emerald-900 font-mono">
-                            BDT {group.totalPaidAmount.toLocaleString()}
-                          </span>
-                        </div>
-
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleExpandMember(group.memberId);
-                          }}
-                          className="h-8 text-xs cursor-pointer border-slate-200 hover:bg-slate-100"
-                        >
-                          {isExpanded ? 'Hide' : 'Details'} ({group.items.length})
-                        </Button>
-                      </div>
-                    </div>
-
-                    {/* Expanded Content */}
-                    {isExpanded && (
-                      <div className="p-4 bg-slate-50/90 border-t border-slate-200">
-                        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-2xs space-y-3">
-                          <div className="flex items-center justify-between flex-wrap gap-2">
-                            <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
-                              <ReceiptIcon className="h-4 w-4 text-emerald-700" />
-                              Billing Slips &amp; Receipts for {group.memberName}
-                            </h4>
-                            <div className="flex items-center gap-2 text-xs flex-wrap">
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h3 className="font-bold text-slate-900 text-sm sm:text-base">
+                                {group.memberName}
+                              </h3>
+                              <span className="font-mono text-[11px] font-bold bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded border border-emerald-200">
+                                ID: {group.memberNo}
+                              </span>
                               {group.fullyPaidCount > 0 && (
-                                <span className="text-emerald-700 font-bold">
-                                  {group.fullyPaidCount} Cleared (BDT {group.totalPaidAmount.toLocaleString()})
+                                <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-300 flex items-center gap-1">
+                                  <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                                  {group.fullyPaidCount === 1 ? '1 Cleared' : `${group.fullyPaidCount} Cleared`}
                                 </span>
                               )}
                               {group.partiallyPaidCount > 0 && (
-                                <span className="text-purple-700 font-bold border-l border-slate-300 pl-2">
-                                  {group.partiallyPaidCount} Partially Paid (Paid: BDT {group.totalPaidAmount.toLocaleString()} • Due: BDT {group.totalPendingAmount.toLocaleString()})
+                                <span className="text-[10px] font-bold bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full border border-purple-300 flex items-center gap-1">
+                                  <Wallet className="h-3 w-3 text-purple-600" />
+                                  {group.partiallyPaidCount === 1 ? 'Partially Paid' : `${group.partiallyPaidCount} Partially Paid`}
                                 </span>
                               )}
                               {group.receivedSlipCount > 0 && (
-                                <span className="text-blue-700 font-bold border-l border-slate-300 pl-2">
-                                  {group.receivedSlipCount} Received Slip{group.receivedSlipCount !== 1 ? 's' : ''}
+                                <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full border border-blue-200 flex items-center gap-1">
+                                  <FileCheck className="h-3 w-3 text-blue-600" />
+                                  {group.receivedSlipCount === 1 ? 'Received Slip' : `${group.receivedSlipCount} Received Slips`}
                                 </span>
                               )}
                               {group.pureDuePendingCount > 0 && (
-                                <span className="text-amber-700 font-bold border-l border-slate-300 pl-2">
-                                  {group.pureDuePendingCount} Due Pending (BDT {group.totalPendingAmount.toLocaleString()})
+                                <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full border border-amber-200 flex items-center gap-1">
+                                  <Clock className="h-3 w-3 text-amber-600" />
+                                  {group.pureDuePendingCount === 1 ? 'Due Pending' : `${group.pureDuePendingCount} Due Pending`}
                                 </span>
                               )}
                               {group.rejectedCount > 0 && (
-                                <span className="text-red-700 font-bold border-l border-slate-300 pl-2">
-                                  {group.rejectedCount} Rejected
+                                <span className="text-[10px] font-bold bg-red-100 text-red-800 px-2 py-0.5 rounded-full border border-red-200 flex items-center gap-1">
+                                  <XCircle className="h-3 w-3 text-red-600" />
+                                  {group.rejectedCount} Slip Rejected
                                 </span>
                               )}
                             </div>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              {group.fullyPaidCount === 0 && group.partiallyPaidCount > 0
+                                ? `${group.partiallyPaidCount} Partially Paid • Last Activity: ${group.lastDate || 'No records'}`
+                                : group.fullyPaidCount > 0 && group.partiallyPaidCount > 0
+                                ? `${group.fullyPaidCount} Cleared • ${group.partiallyPaidCount} Partially Paid • Last Activity: ${group.lastDate || 'No records'}`
+                                : `${group.fullyPaidCount} Cleared Receipt${group.fullyPaidCount !== 1 ? 's' : ''} • Last Activity: ${group.lastDate || 'No records'}`}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-4 self-end sm:self-auto">
+                          <div className="text-right">
+                            <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                              Total Collected
+                            </span>
+                            <span className="text-sm font-bold text-emerald-900 font-mono">
+                              BDT {group.totalPaidAmount.toLocaleString()}
+                            </span>
                           </div>
 
-                          <div className="border border-slate-100 rounded-lg overflow-x-auto">
-                            <Table className="table-fixed w-full min-w-[1000px]">
-                              <TableHeader className="bg-slate-50">
-                                <TableRow className="text-xs">
-                                  <TableHead className="w-[12.5%] text-center">Member ID</TableHead>
-                                  <TableHead className="w-[12.5%] text-center">Date</TableHead>
-                                  <TableHead className="w-[12.5%] text-center">Transaction No</TableHead>
-                                  <TableHead className="w-[12.5%] text-center">Amount</TableHead>
-                                  <TableHead className="w-[12.5%] text-center">Receipt Proof</TableHead>
-                                  <TableHead className="w-[12.5%] text-center">Status</TableHead>
-                                  <TableHead className="w-[12.5%] text-center">Action</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {displayItems.length === 0 && (
-                                  <TableRow>
-                                    <TableCell colSpan={7} className="text-center py-8 text-slate-400 italic text-xs">
-                                      No payment proof slips or cleared receipts submitted by {group.memberName} yet.
-                                    </TableCell>
-                                  </TableRow>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleExpandMember(group.memberId);
+                            }}
+                            className="h-8 text-xs cursor-pointer border-slate-200 hover:bg-slate-100"
+                          >
+                            {isExpanded ? 'Hide' : 'Details'} ({group.items.length})
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* Expanded Content */}
+                      {isExpanded && (
+                        <div className="p-4 bg-slate-50/90 border-t border-slate-200">
+                          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-2xs space-y-3">
+                            <div className="flex items-center justify-between flex-wrap gap-2">
+                              <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                                <ReceiptIcon className="h-4 w-4 text-emerald-700" />
+                                Billing Slips &amp; Receipts for {group.memberName}
+                              </h4>
+                              <div className="flex items-center gap-2 text-xs flex-wrap">
+                                {group.fullyPaidCount > 0 && (
+                                  <span className="text-emerald-700 font-bold">
+                                    {group.fullyPaidCount} Cleared (BDT {group.totalPaidAmount.toLocaleString()})
+                                  </span>
                                 )}
-                                {displayItems.map((item) => {
-                                  const isPendingDue = item.status === 'pending' || (item.isPartial && item.recordType === 'pending_slip');
-                                  const isRejected = item.status === 'rejected';
+                                {group.partiallyPaidCount > 0 && (
+                                  <span className="text-purple-700 font-bold border-l border-slate-300 pl-2">
+                                    {group.partiallyPaidCount} Partially Paid (Paid: BDT {group.totalPaidAmount.toLocaleString()} • Due: BDT {group.totalPendingAmount.toLocaleString()})
+                                  </span>
+                                )}
+                                {group.receivedSlipCount > 0 && (
+                                  <span className="text-blue-700 font-bold border-l border-slate-300 pl-2">
+                                    {group.receivedSlipCount} Received Slip{group.receivedSlipCount !== 1 ? 's' : ''}
+                                  </span>
+                                )}
+                                {group.pureDuePendingCount > 0 && (
+                                  <span className="text-amber-700 font-bold border-l border-slate-300 pl-2">
+                                    {group.pureDuePendingCount} Due Pending (BDT {group.totalPendingAmount.toLocaleString()})
+                                  </span>
+                                )}
+                                {group.rejectedCount > 0 && (
+                                  <span className="text-red-700 font-bold border-l border-slate-300 pl-2">
+                                    {group.rejectedCount} Rejected
+                                  </span>
+                                )}
+                              </div>
+                            </div>
 
-                                  return (
-                                    <TableRow
-                                      key={item.id}
-                                      className={`text-xs transition-colors ${
-                                        isRejected
-                                          ? 'bg-red-50/30 hover:bg-red-50/60'
-                                          : isPendingDue
-                                          ? 'hover:bg-amber-50/40'
-                                          : 'hover:bg-slate-50/80'
-                                      }`}
-                                    >
-                                      <TableCell className="p-3 align-middle text-center font-mono text-emerald-800 font-bold truncate">
-                                        {group.memberNo}
+                            <div className="border border-slate-100 rounded-lg overflow-x-auto">
+                              <Table className="table-fixed w-full min-w-[1000px]">
+                                <TableHeader className="bg-slate-50">
+                                  <TableRow className="text-xs">
+                                    <TableHead className="w-[10%] text-center">Member ID</TableHead>
+                                    <TableHead className="w-[10%] text-center">Date</TableHead>
+                                    <TableHead className="w-[15%] text-center">Transaction No</TableHead>
+                                    <TableHead className="w-[12%] text-center">Amount</TableHead>
+                                    <TableHead className="w-[13%] text-center">Receipt Proof</TableHead>
+                                    <TableHead className="w-[14%] text-center">Status</TableHead>
+                                    <TableHead className="w-[26%] text-center">Actions</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {displayItems.length === 0 && (
+                                    <TableRow>
+                                      <TableCell colSpan={7} className="text-center py-8 text-slate-400 italic text-xs">
+                                        No payment proof slips or cleared receipts submitted by {group.memberName} yet.
                                       </TableCell>
-                                      <TableCell className="p-3 align-middle text-center text-slate-600 font-medium whitespace-nowrap">
-                                        {item.date}
-                                      </TableCell>
-                                      <TableCell className="p-3 align-middle text-center font-mono text-slate-500 text-[11px] truncate">
-                                        {item.receiptNo ? (
-                                          <div className="flex flex-col items-center">
-                                            <span className="font-bold text-slate-900">{item.receiptNo}</span>
-                                            <span className="text-[10px] text-slate-400">Trx: {item.transactionNo}</span>
-                                          </div>
-                                        ) : (
-                                          item.transactionNo
-                                        )}
-                                      </TableCell>
-                                      <TableCell className="p-3 align-middle text-center font-bold text-slate-900 whitespace-nowrap">
-                                        BDT {item.amount.toLocaleString()}
-                                      </TableCell>
+                                    </TableRow>
+                                  )}
+                                  {displayItems.map((item) => {
+                                    const isPendingDue = item.status === 'pending' || (item.isPartial && item.recordType === 'pending_slip');
+                                    const isRejected = item.status === 'rejected';
 
-                                      <TableCell className="p-3 align-middle text-center">
-                                        {item.receiptPhoto ? (
-                                          <div className="flex flex-col items-center justify-center gap-1">
-                                            <ReceiptSlipThumbnail
-                                              photoUrl={item.receiptPhoto}
-                                              title={`${group.memberName} - ${item.receiptNo || item.transactionNo}`}
-                                              date={item.receiptPhotoUploadedAt ? `Uploaded: ${item.receiptPhotoUploadedAt}` : undefined}
-                                              isRejected={item.isRejected}
-                                              isPartial={item.isPartial}
-                                              isSlipReceived={!item.isPartial && item.status === 'pending' && !!item.receiptPhoto}
-                                              rejectionReason={item.rejectionReason}
-                                              onClick={() => viewReceiptPhoto(
-                                                item.receiptPhoto!,
-                                                `${group.memberName} - ${item.receiptNo || item.transactionNo}`,
-                                                item.receiptPhotoUploadedAt,
-                                                item.isRejected,
-                                                item.rejectionReason
-                                              )}
-                                            />
-                                          </div>
-                                        ) : (
-                                          <span className="text-[11px] text-slate-400 italic text-center block">
-                                            No slip uploaded
-                                          </span>
-                                        )}
-                                      </TableCell>
+                                    return (
+                                      <TableRow
+                                        key={item.id}
+                                        className={`text-xs transition-colors ${
+                                          isRejected
+                                            ? 'bg-red-50/30 hover:bg-red-50/60'
+                                            : isPendingDue
+                                            ? 'hover:bg-amber-50/40'
+                                            : 'hover:bg-slate-50/80'
+                                        }`}
+                                      >
+                                        <TableCell className="p-3 align-middle text-center font-mono text-emerald-800 font-bold truncate">
+                                          {group.memberNo}
+                                        </TableCell>
+                                        <TableCell className="p-3 align-middle text-center text-slate-600 font-medium whitespace-nowrap">
+                                          {item.date}
+                                        </TableCell>
+                                        <TableCell className="p-3 align-middle text-center font-mono text-slate-700 font-bold text-[11px] truncate">
+                                          {item.inputtedReference || item.transactionNo || '-'}
+                                        </TableCell>
+                                        <TableCell className="p-3 align-middle text-center font-bold text-slate-900 whitespace-nowrap">
+                                          BDT {item.amount.toLocaleString()}
+                                        </TableCell>
 
-                                      {/* Status Column */}
-                                      <TableCell className="p-3 align-middle text-center">
-                                        {item.isPartial ? (
-                                          item.recordType === 'receipt' || item.status === 'paid' ? (
-                                            <div className="flex flex-col items-center justify-center gap-0.5">
-                                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-purple-50 text-purple-800 border border-purple-300 whitespace-nowrap shadow-2xs">
-                                                <Wallet className="h-3.5 w-3.5 text-purple-600" /> Partially Paid
-                                              </span>
-                                              <span className="text-[9px] text-purple-700 font-semibold">Partial Payment</span>
+                                        <TableCell className="p-3 align-middle text-center">
+                                          {item.receiptPhoto ? (
+                                            <div className="flex flex-col items-center justify-center gap-1">
+                                              <ReceiptSlipThumbnail
+                                                photoUrl={item.receiptPhoto}
+                                                title={`${group.memberName} - ${item.receiptNo || item.transactionNo}`}
+                                                date={item.receiptPhotoUploadedAt ? `Uploaded: ${item.receiptPhotoUploadedAt}` : undefined}
+                                                isRejected={item.isRejected}
+                                                isPartial={item.isPartial}
+                                                isSlipReceived={!item.isPartial && item.status === 'pending' && !!item.receiptPhoto}
+                                                rejectionReason={item.rejectionReason}
+                                                onClick={() => viewReceiptPhoto(
+                                                  item.receiptPhoto!,
+                                                  `${group.memberName} - ${item.receiptNo || item.transactionNo}`,
+                                                  item.receiptPhotoUploadedAt,
+                                                  item.isRejected,
+                                                  item.rejectionReason
+                                                )}
+                                              />
                                             </div>
                                           ) : (
-                                            <div className="flex flex-col items-center justify-center gap-0.5">
-                                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-900 border border-amber-300 whitespace-nowrap shadow-2xs">
-                                                <Clock className="h-3.5 w-3.5 text-amber-600" /> Remaining Due
-                                              </span>
-                                              <span className="text-[9px] text-purple-700 font-semibold">Partially Paid</span>
-                                            </div>
-                                          )
-                                        ) : item.status === 'paid' ? (
-                                          <div className="flex justify-center">
-                                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 whitespace-nowrap shadow-2xs">
-                                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> Paid
+                                            <span className="text-[11px] text-slate-400 italic text-center block">
+                                              No slip uploaded
                                             </span>
-                                          </div>
-                                        ) : isPendingDue && item.receiptPhoto ? (
-                                          <div className="flex justify-center">
-                                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-300 whitespace-nowrap shadow-2xs">
-                                              <FileCheck className="h-3.5 w-3.5 text-blue-600" /> Slip Received
-                                            </span>
-                                          </div>
-                                        ) : isRejected ? (
-                                          <div className="flex flex-col items-center justify-center gap-0.5">
-                                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-red-50 text-red-800 border border-red-300 whitespace-nowrap shadow-2xs">
-                                              <XCircle className="h-3.5 w-3.5 text-red-600" /> Rejected
-                                            </span>
-                                          </div>
-                                        ) : (
-                                          <div className="flex justify-center">
-                                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300 whitespace-nowrap shadow-2xs">
-                                              <Clock className="h-3.5 w-3.5 text-amber-600" /> Pending Due
-                                            </span>
-                                          </div>
-                                        )}
-                                      </TableCell>
+                                          )}
+                                        </TableCell>
 
-                                      {/* Action Column */}
-                                      <TableCell className="p-3 align-middle text-center">
-                                        {isPendingDue && item.rawTransaction ? (
-                                          <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                                            <Button
-                                              size="sm"
-                                              onClick={() => openCollectPaymentModal(item.rawTransaction!)}
-                                              className="h-7 text-xs bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer shadow-2xs"
-                                            >
-                                              <Wallet className="h-3 w-3 mr-1" /> Collect / Settle
-                                            </Button>
-                                            {item.receiptPhoto && (
+                                        {/* Status Column */}
+                                        <TableCell className="p-3 align-middle text-center">
+                                          {item.isPartial ? (
+                                            item.recordType === 'receipt' || item.status === 'paid' ? (
+                                              <div className="flex flex-col items-center justify-center gap-0.5">
+                                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-purple-50 text-purple-800 border border-purple-300 whitespace-nowrap shadow-2xs">
+                                                  <Wallet className="h-3.5 w-3.5 text-purple-600" /> Partially Paid
+                                                </span>
+                                                <span className="text-[9px] text-purple-700 font-semibold">Partial Payment</span>
+                                              </div>
+                                            ) : (
+                                              <div className="flex flex-col items-center justify-center gap-0.5">
+                                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-900 border border-amber-300 whitespace-nowrap shadow-2xs">
+                                                  <Clock className="h-3.5 w-3.5 text-amber-600" /> Remaining Due
+                                                </span>
+                                                <span className="text-[9px] text-purple-700 font-semibold">Partially Paid</span>
+                                              </div>
+                                            )
+                                          ) : item.status === 'paid' ? (
+                                            <div className="flex justify-center">
+                                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 whitespace-nowrap shadow-2xs">
+                                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> Paid
+                                              </span>
+                                            </div>
+                                          ) : isPendingDue && item.receiptPhoto ? (
+                                            <div className="flex justify-center">
+                                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-300 whitespace-nowrap shadow-2xs">
+                                                <FileCheck className="h-3.5 w-3.5 text-blue-600" /> Slip Received
+                                              </span>
+                                            </div>
+                                          ) : isRejected ? (
+                                            <div className="flex flex-col items-center justify-center gap-0.5">
+                                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-red-50 text-red-800 border border-red-300 whitespace-nowrap shadow-2xs">
+                                                <XCircle className="h-3.5 w-3.5 text-red-600" /> Rejected
+                                              </span>
+                                            </div>
+                                          ) : (
+                                            <div className="flex justify-center">
+                                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300 whitespace-nowrap shadow-2xs">
+                                                <Clock className="h-3.5 w-3.5 text-amber-600" /> Pending Due
+                                              </span>
+                                            </div>
+                                          )}
+                                        </TableCell>
+
+                                        {/* Action Column */}
+                                        <TableCell className="p-3 align-middle text-center">
+                                          <div className="flex items-center justify-center gap-1.5 flex-nowrap">
+                                            {(item.rawReceipt || item.status === 'paid' || item.recordType === 'receipt') ? (
+                                              <Button
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={() => handlePrint(item.rawReceipt, item.rawTransaction)}
+                                                className="h-7 min-w-[68px] px-2 text-xs font-semibold border-emerald-300 text-emerald-800 hover:bg-emerald-50 cursor-pointer shadow-2xs flex items-center justify-center gap-1"
+                                                title="Print receipt"
+                                              >
+                                                <Printer className="h-3.5 w-3.5" /> Print
+                                              </Button>
+                                            ) : canManage && item.rawTransaction ? (
+                                              <Button
+                                                size="sm"
+                                                onClick={() => openCollectPaymentModal(item.rawTransaction!)}
+                                                className="h-7 min-w-[68px] px-2 text-xs font-semibold bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer shadow-2xs flex items-center justify-center gap-1"
+                                                title="Settle payment"
+                                              >
+                                                <Wallet className="h-3.5 w-3.5" /> Settle
+                                              </Button>
+                                            ) : null}
+
+                                            {canManage && item.receiptPhoto && !item.isRejected && item.status !== 'paid' && item.rawTransaction && (
                                               <Button
                                                 size="sm"
                                                 variant="outline"
                                                 onClick={() => openRejectProofModal(item.rawTransaction!)}
-                                                className="h-7 text-xs border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800 cursor-pointer shadow-2xs"
+                                                className="h-7 w-7 p-0 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 cursor-pointer shadow-2xs flex items-center justify-center"
+                                                title="Reject slip"
                                               >
-                                                <XCircle className="h-3.5 w-3.5 mr-1 text-red-600" /> Reject
+                                                <XCircle className="h-3.5 w-3.5" />
                                               </Button>
                                             )}
                                           </div>
-                                        ) : (item.rawReceipt || item.status === 'paid' || item.recordType === 'receipt') ? (
-                                          <div className="flex justify-center">
-                                            <Button
-                                              size="sm"
-                                              variant="outline"
-                                              onClick={() => handlePrint(item.rawReceipt, item.rawTransaction)}
-                                              className="h-7 px-2.5 text-xs border-emerald-300 text-emerald-800 hover:bg-emerald-50 cursor-pointer shadow-2xs font-bold"
-                                            >
-                                              <Printer className="h-3 w-3 mr-1" /> Print
-                                            </Button>
-                                          </div>
-                                        ) : isRejected ? (
-                                          <span className="text-[11px] text-red-600 font-medium text-center block">
-                                            Archived Rejected
-                                          </span>
-                                        ) : item.isPartial ? (
-                                          <span className="text-[11px] text-purple-700 font-medium text-center block">Cleared Portion</span>
-                                        ) : (
-                                          <span className="text-[11px] text-slate-400 font-medium text-center block">Cleared</span>
-                                        )}
-                                      </TableCell>
-                                    </TableRow>
-                                  );
-                                })}
-                              </TableBody>
-                            </Table>
+                                        </TableCell>
+                                      </TableRow>
+                                    );
+                                  })}
+                                </TableBody>
+                              </Table>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
-        )}
-
-        {/* VIEW 2: ALL INDIVIDUAL RECEIPTS & SLIPS TABLE */}
-        {activeTab === 'all' && (
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
-            <div className="p-4 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
-              <div>
-                <h3 className="font-bold text-slate-900 text-sm">
-                  Chronological Billing Records &amp; Slips
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Showing {allChronologicalItems.length} records matching current filter
-                </p>
-              </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
+          )}
 
-            <div className="overflow-x-auto">
-              <Table className="table-fixed w-full min-w-[1000px]">
-                <TableHeader className="bg-slate-50">
-                  <TableRow className="text-xs">
-                    <TableHead className="w-[12.5%] text-center font-semibold text-slate-700">Member Name</TableHead>
-                    <TableHead className="w-[12.5%] text-center font-semibold text-slate-700">Member ID</TableHead>
-                    <TableHead className="w-[12.5%] text-center font-semibold text-slate-700">Date</TableHead>
-                    <TableHead className="w-[12.5%] text-center font-semibold text-slate-700">Receipt / Trx No</TableHead>
-                    <TableHead className="w-[12.5%] text-center font-semibold text-slate-700">Amount</TableHead>
-                    <TableHead className="w-[12.5%] text-center font-semibold text-slate-700">Receipt Photo / Proof</TableHead>
-                    <TableHead className="w-[12.5%] text-center font-semibold text-slate-700">Status</TableHead>
-                    <TableHead className="w-[12.5%] text-center font-semibold text-slate-700">Action</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {allChronologicalItems.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={8} className="p-8 text-center text-slate-400 text-xs">
-                        No records found.
-                      </TableCell>
+          {/* VIEW 3: ALL INDIVIDUAL RECEIPTS & SLIPS TABLE */}
+          {activeTab === 'all' && (
+            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+              <div className="p-4 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm">
+                    Chronological Billing Records &amp; Slips
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Showing {allChronologicalItems.length} records matching current filter
+                  </p>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <Table className="table-fixed w-full min-w-[1000px]">
+                  <TableHeader className="bg-slate-50">
+                    <TableRow className="text-xs">
+                      <TableHead className="w-[12%] text-center font-semibold text-slate-700">Member Name</TableHead>
+                      <TableHead className="w-[10%] text-center font-semibold text-slate-700">Member ID</TableHead>
+                      <TableHead className="w-[11%] text-center font-semibold text-slate-700">Date</TableHead>
+                      <TableHead className="w-[14%] text-center font-semibold text-slate-700">Receipt / Trx No</TableHead>
+                      <TableHead className="w-[12%] text-center font-semibold text-slate-700">Amount</TableHead>
+                      <TableHead className="w-[12%] text-center font-semibold text-slate-700">Receipt Photo / Proof</TableHead>
+                      <TableHead className="w-[13%] text-center font-semibold text-slate-700">Status</TableHead>
+                      <TableHead className="w-[16%] text-center font-semibold text-slate-700">Actions</TableHead>
                     </TableRow>
-                  ) : (
-                    allChronologicalItems.map((item) => {
-                      const isPendingDue = item.status === 'pending' || (item.isPartial && item.recordType === 'pending_slip');
-                      const isRejected = item.status === 'rejected';
+                  </TableHeader>
+                  <TableBody>
+                    {allChronologicalItems.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={8} className="p-8 text-center text-slate-400 text-xs">
+                          No records found.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      allChronologicalItems.map((item) => {
+                        const isPendingDue = item.status === 'pending' || (item.isPartial && item.recordType === 'pending_slip');
+                        const isRejected = item.status === 'rejected';
 
-                      return (
-                        <TableRow key={item.id} className="text-xs hover:bg-slate-50/80">
-                          <TableCell className="p-3 align-middle text-center font-semibold text-slate-900">
-                            {item.memberName}
-                          </TableCell>
-                          <TableCell className="p-3 align-middle text-center font-mono font-bold text-slate-700">
-                            {item.memberNo}
-                          </TableCell>
-                          <TableCell className="p-3 align-middle text-center text-slate-600 whitespace-nowrap">
-                            {item.date}
-                          </TableCell>
-                          <TableCell className="p-3 align-middle text-center font-mono text-slate-700">
-                            {item.receiptNo ? (
-                              <div className="flex flex-col items-center">
-                                <span className="font-bold text-slate-900">{item.receiptNo}</span>
-                                <span className="text-[10px] text-slate-400">Trx: {item.transactionNo}</span>
-                              </div>
-                            ) : (
-                              item.transactionNo
-                            )}
-                          </TableCell>
-                          <TableCell className="p-3 align-middle text-center font-bold text-slate-900 whitespace-nowrap">
-                            BDT {item.amount.toLocaleString()}
-                          </TableCell>
+                        return (
+                          <TableRow key={item.id} className="text-xs hover:bg-slate-50/80">
+                            <TableCell className="p-3 align-middle text-center font-semibold text-slate-900">
+                              {item.memberName}
+                            </TableCell>
+                            <TableCell className="p-3 align-middle text-center font-mono font-bold text-slate-700">
+                              {item.memberNo}
+                            </TableCell>
+                            <TableCell className="p-3 align-middle text-center text-slate-600 whitespace-nowrap">
+                              {item.date}
+                            </TableCell>
+                            <TableCell className="p-3 align-middle text-center font-mono font-bold text-slate-700">
+                              {isRejected || item.isRejected || item.status === 'rejected'
+                                ? '-'
+                                : item.inputtedReference || item.transactionNo || '-'}
+                            </TableCell>
+                            <TableCell className="p-3 align-middle text-center font-bold text-slate-900 whitespace-nowrap">
+                              BDT {item.amount.toLocaleString()}
+                            </TableCell>
 
-                          <TableCell className="p-3 align-middle text-center">
-                            {item.receiptPhoto ? (
-                              <div className="flex justify-center">
-                                <ReceiptSlipThumbnail
-                                  photoUrl={item.receiptPhoto}
-                                  title={`${item.memberName} - ${item.receiptNo || item.transactionNo}`}
-                                  date={item.receiptPhotoUploadedAt ? `Uploaded: ${item.receiptPhotoUploadedAt}` : undefined}
-                                  isRejected={item.isRejected}
-                                  isPartial={item.isPartial}
-                                  isSlipReceived={!item.isPartial && item.status === 'pending' && !!item.receiptPhoto}
-                                  rejectionReason={item.rejectionReason}
-                                  onClick={() => viewReceiptPhoto(
-                                    item.receiptPhoto!,
-                                    `${item.memberName} - ${item.receiptNo || item.transactionNo}`,
-                                    item.receiptPhotoUploadedAt,
-                                    item.isRejected,
-                                    item.rejectionReason
-                                  )}
-                                />
-                              </div>
-                            ) : (
-                              <span className="text-[11px] text-slate-400 italic text-center block">
-                                No slip uploaded
-                              </span>
-                            )}
-                          </TableCell>
-
-                          <TableCell className="p-3 align-middle text-center">
-                            {item.isPartial ? (
-                              item.recordType === 'receipt' || item.status === 'paid' ? (
-                                <div className="flex flex-col items-center justify-center gap-0.5">
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-800 border border-purple-300 whitespace-nowrap">
-                                    <Wallet className="h-3 w-3 text-purple-600" /> Partially Paid
-                                  </span>
-                                  <span className="text-[9px] text-purple-700 font-semibold">Partial Payment</span>
+                            <TableCell className="p-3 align-middle text-center">
+                              {item.receiptPhoto ? (
+                                <div className="flex justify-center">
+                                  <ReceiptSlipThumbnail
+                                    photoUrl={item.receiptPhoto}
+                                    title={`${item.memberName} - ${item.receiptNo || item.transactionNo}`}
+                                    date={item.receiptPhotoUploadedAt ? `Uploaded: ${item.receiptPhotoUploadedAt}` : undefined}
+                                    isRejected={item.isRejected}
+                                    isPartial={item.isPartial}
+                                    isSlipReceived={!item.isPartial && item.status === 'pending' && !!item.receiptPhoto}
+                                    rejectionReason={item.rejectionReason}
+                                    onClick={() => viewReceiptPhoto(
+                                      item.receiptPhoto!,
+                                      `${item.memberName} - ${item.receiptNo || item.transactionNo}`,
+                                      item.receiptPhotoUploadedAt,
+                                      item.isRejected,
+                                      item.rejectionReason
+                                    )}
+                                  />
                                 </div>
                               ) : (
-                                <div className="flex flex-col items-center justify-center gap-0.5">
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-900 border border-amber-300 whitespace-nowrap">
-                                    <Clock className="h-3 w-3 text-amber-600" /> Remaining Due
-                                  </span>
-                                  <span className="text-[9px] text-purple-700 font-semibold">Partially Paid</span>
-                                </div>
-                              )
-                            ) : item.status === 'paid' ? (
-                              <div className="flex justify-center">
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 whitespace-nowrap">
-                                  <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Paid
+                                <span className="text-[11px] text-slate-400 italic text-center block">
+                                  No slip uploaded
                                 </span>
-                              </div>
-                            ) : isPendingDue ? (
-                              <div className="flex justify-center">
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300 whitespace-nowrap">
-                                  <Clock className="h-3 w-3 text-amber-600" /> Pending Due
-                                </span>
-                              </div>
-                            ) : isRejected ? (
-                              <div className="flex flex-col items-center justify-center gap-0.5">
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-50 text-red-800 border border-red-300 whitespace-nowrap">
-                                  <XCircle className="h-3 w-3 text-red-600" /> Rejected
-                                </span>
-                              </div>
-                            ) : (
-                              <div className="flex justify-center">
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 whitespace-nowrap">
-                                  <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Paid
-                                </span>
-                              </div>
-                            )}
-                          </TableCell>
+                              )}
+                            </TableCell>
 
-                          <TableCell className="p-3 align-middle text-center">
-                            {isPendingDue && item.rawTransaction ? (
-                              <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                                <Button
-                                  size="sm"
-                                  onClick={() => openCollectPaymentModal(item.rawTransaction!)}
-                                  className="h-7 text-xs bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer shadow-2xs"
-                                >
-                                  <Wallet className="h-3 w-3 mr-1" /> Collect / Settle
-                                </Button>
-                                {item.receiptPhoto && (
+                            <TableCell className="p-3 align-middle text-center">
+                              {item.isPartial ? (
+                                item.recordType === 'receipt' || item.status === 'paid' ? (
+                                  <div className="flex flex-col items-center justify-center gap-0.5">
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-800 border border-purple-300 whitespace-nowrap">
+                                      <Wallet className="h-3 w-3 text-purple-600" /> Partially Paid
+                                    </span>
+                                    <span className="text-[9px] text-purple-700 font-semibold">Partial Payment</span>
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-col items-center justify-center gap-0.5">
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-900 border border-amber-300 whitespace-nowrap">
+                                      <Clock className="h-3 w-3 text-amber-600" /> Remaining Due
+                                    </span>
+                                    <span className="text-[9px] text-purple-700 font-semibold">Partially Paid</span>
+                                  </div>
+                                )
+                              ) : item.status === 'paid' ? (
+                                <div className="flex justify-center">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 whitespace-nowrap">
+                                    <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Paid
+                                  </span>
+                                </div>
+                              ) : isPendingDue ? (
+                                <div className="flex justify-center">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300 whitespace-nowrap">
+                                    <Clock className="h-3 w-3 text-amber-600" /> Pending Due
+                                  </span>
+                                </div>
+                              ) : isRejected ? (
+                                <div className="flex flex-col items-center justify-center gap-0.5">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-50 text-red-800 border border-red-300 whitespace-nowrap">
+                                    <XCircle className="h-3 w-3 text-red-600" /> Rejected
+                                  </span>
+                                </div>
+                              ) : (
+                                <div className="flex justify-center">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 whitespace-nowrap">
+                                    <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Paid
+                                  </span>
+                                </div>
+                              )}
+                            </TableCell>
+
+                            <TableCell className="p-3 align-middle text-center">
+                              <div className="flex items-center justify-center gap-1.5 flex-nowrap">
+                                {(item.rawReceipt || item.status === 'paid' || item.recordType === 'receipt') ? (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handlePrint(item.rawReceipt, item.rawTransaction, {
+                                      demandTrxNo: item.transactionNo || item.rawTransaction?.transaction_no,
+                                    })}
+                                    className="h-7 min-w-[68px] px-2 text-xs font-semibold border-emerald-300 text-emerald-800 hover:bg-emerald-50 cursor-pointer shadow-2xs flex items-center justify-center gap-1"
+                                    title="Print receipt"
+                                  >
+                                    <Printer className="h-3.5 w-3.5" /> Print
+                                  </Button>
+                                ) : canManage && item.rawTransaction ? (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => openCollectPaymentModal(item.rawTransaction!)}
+                                    className="h-7 min-w-[68px] px-2 text-xs font-semibold bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer shadow-2xs flex items-center justify-center gap-1"
+                                    title="Settle payment"
+                                  >
+                                    <Wallet className="h-3.5 w-3.5" /> Settle
+                                  </Button>
+                                ) : null}
+
+                                {canManage && item.receiptPhoto && !item.isRejected && item.status !== 'paid' && item.rawTransaction && (
                                   <Button
                                     size="sm"
                                     variant="outline"
                                     onClick={() => openRejectProofModal(item.rawTransaction!)}
-                                    className="h-7 text-xs border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800 cursor-pointer shadow-2xs"
+                                    className="h-7 w-7 p-0 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 cursor-pointer shadow-2xs flex items-center justify-center"
+                                    title="Reject slip"
                                   >
-                                    <XCircle className="h-3.5 w-3.5 mr-1 text-red-600" /> Reject
+                                    <XCircle className="h-3.5 w-3.5" />
                                   </Button>
                                 )}
+
                               </div>
-                            ) : (item.rawReceipt || item.status === 'paid' || item.recordType === 'receipt') ? (
-                              <div className="flex justify-center">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handlePrint(item.rawReceipt, item.rawTransaction)}
-                                  className="h-7 px-2.5 text-xs border-emerald-300 text-emerald-800 hover:bg-emerald-50 cursor-pointer shadow-2xs font-bold"
-                                >
-                                  <Printer className="h-3 w-3 mr-1" /> Print
-                                </Button>
-                              </div>
-                            ) : isRejected ? (
-                              <span className="text-[11px] text-red-600 font-medium text-center block">
-                                Archived Rejected
-                              </span>
-                            ) : item.isPartial ? (
-                              <span className="text-[11px] text-purple-700 font-medium text-center block">Cleared Portion</span>
-                            ) : (
-                              <span className="text-[11px] text-slate-400 font-medium text-center block">Cleared</span>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </Table>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
-          </div>
-        )}
+          )}
         </div>
 
-        {/* DIALOG: ISSUE NEW DIRECT RECEIPT */}
-        <Dialog open={openNewModal} onOpenChange={setOpenNewModal}>
-          <DialogContent className="max-w-md">
+        {/* DIALOG 1: CREATE & ASSIGN PAYMENT DUES (BILLING DEMAND GENERATOR) */}
+        <Dialog open={openDemand} onOpenChange={setOpenDemand}>
+          <DialogContent className="max-w-xl max-h-[92vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-slate-900">
-                <ReceiptIcon className="h-5 w-5 text-emerald-700" />
-                Issue New Payment Receipt
+                <CalendarCheck className="h-5 w-5 text-emerald-700" />
+                Create &amp; Assign Payment Dues
               </DialogTitle>
             </DialogHeader>
 
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-3.5 pt-1">
-              <div>
-                <Label className="text-xs font-bold text-slate-700">Transaction ID (Optional / Ref)</Label>
-                <Input
-                  type="number"
-                  placeholder="Enter Transaction ID or leave empty"
-                  {...register('transaction_id')}
-                  className="mt-1 bg-white text-xs"
-                />
-                {errors.transaction_id && (
-                  <p className="text-xs text-red-600 mt-0.5">{String(errors.transaction_id.message)}</p>
-                )}
-              </div>
-
-              <div>
-                <Label className="text-xs font-bold text-slate-700">Paid Amount (BDT)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  placeholder="e.g. 2000"
-                  {...register('amount')}
-                  className="mt-1 bg-white text-xs font-bold"
-                  required
-                />
-                {errors.amount && (
-                  <p className="text-xs text-red-600 mt-0.5">{String(errors.amount.message)}</p>
-                )}
-              </div>
-
-              <div>
-                <Label className="text-xs font-bold text-slate-700">Payment Method</Label>
-                <select
-                  className="w-full border border-slate-300 rounded-md p-2 text-xs bg-white mt-1 capitalize"
-                  {...register('payment_method')}
+            <form onSubmit={onSubmitDemand} className="space-y-4 pt-2">
+              <div className="grid grid-cols-2 gap-3 p-1.5 bg-slate-100 rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => setDemandCategory('monthly_payment')}
+                  className={`py-2 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    demandCategory === 'monthly_payment'
+                      ? 'bg-white text-emerald-800 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
                 >
-                  {['cash', 'bank', 'mobile_banking', 'other'].map((m) => (
-                    <option key={m} value={m} className="capitalize">
-                      {m.replace(/_/g, ' ')}
-                    </option>
-                  ))}
-                </select>
+                  <CalendarIcon className="h-3.5 w-3.5 text-emerald-700" />
+                  Monthly Payment
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDemandCategory('one_time')}
+                  className={`py-2 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    demandCategory === 'one_time'
+                      ? 'bg-white text-emerald-800 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <CreditCard className="h-3.5 w-3.5 text-emerald-700" />
+                  One-Time Payment
+                </button>
+              </div>
+
+              <div className="space-y-2 p-3.5 bg-slate-50 border border-slate-200 rounded-lg">
+                <Label className="font-bold text-slate-900 text-xs">Assign To Which Member(s)?</Label>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="radio"
+                      name="target_group"
+                      checked={targetAllMembers}
+                      onChange={() => {
+                        setTargetAllMembers(true);
+                        setSelectedMemberId('');
+                      }}
+                      className="text-emerald-700 focus:ring-emerald-700"
+                    />
+                    <span className="text-xs font-semibold text-slate-900">
+                      All Active Members ({membersList.length} members)
+                    </span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="radio"
+                      name="target_group"
+                      checked={!targetAllMembers}
+                      onChange={() => setTargetAllMembers(false)}
+                      className="text-emerald-700 focus:ring-emerald-700"
+                    />
+                    <span className="text-xs font-semibold text-slate-900">Specific Single Member</span>
+                  </label>
+
+                  {!targetAllMembers && (
+                    <select
+                      className="w-full border border-slate-300 rounded-md p-2 bg-white text-xs mt-2"
+                      value={selectedMemberId}
+                      onChange={(e) => setSelectedMemberId(e.target.value)}
+                      required={!targetAllMembers}
+                    >
+                      <option value="">-- Choose a member --</option>
+                      {membersList.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name} (ID: {m.member_profile?.member_no || 'Unassigned'})
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              </div>
+
+              {demandCategory === 'monthly_payment' && (
+                <div className="space-y-2.5 p-3.5 bg-slate-50 border border-slate-200 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <Label className="font-bold text-slate-900 text-xs">Select Month(s) for Subscription</Label>
+                    <div className="flex items-center gap-2">
+                      <select
+                        className="border border-slate-300 rounded px-2 py-0.5 text-xs bg-white font-semibold"
+                        value={demandYear}
+                        onChange={(e) => {
+                          const newYr = Number(e.target.value);
+                          setDemandYear(newYr);
+                          const firstAvailable = MONTH_NAMES
+                            .map((m) => `${m} ${newYr}`)
+                            .find((mKey) => !createdMonthsSet.has(mKey));
+                          setSelectedMonths(firstAvailable ? [firstAvailable] : []);
+                        }}
+                      >
+                        {[2024, 2025, 2026, 2027, 2028].map((y) => (
+                          <option key={y} value={y}>{y}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={handleSelectAllMonths}
+                        className="text-[11px] text-emerald-800 font-bold hover:underline cursor-pointer"
+                      >
+                        Available Months
+                      </button>
+                      <span className="text-slate-300">•</span>
+                      <button
+                        type="button"
+                        onClick={handleClearMonths}
+                        className="text-[11px] text-rose-700 font-bold hover:underline cursor-pointer"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+
+                  {MONTH_NAMES.every((m) => createdMonthsSet.has(`${m} ${demandYear}`) || createdMonthsSet.has(m)) && (
+                    <div className="p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-900 flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+                      <span>All 12 months for <b>{demandYear}</b> have already been created.</span>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 pt-1">
+                    {MONTH_NAMES.map((m) => {
+                      const monthKey = `${m} ${demandYear}`;
+                      const isAlreadyCreated = createdMonthsSet.has(monthKey) || createdMonthsSet.has(m);
+                      const isSelected = selectedMonths.includes(monthKey);
+
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          disabled={isAlreadyCreated}
+                          onClick={() => handleToggleMonth(monthKey)}
+                          title={isAlreadyCreated ? `${monthKey} demand has already been created` : undefined}
+                          className={`p-2 text-xs font-semibold rounded-md border text-center transition-all flex flex-col items-center justify-center gap-0.5 ${
+                            isAlreadyCreated
+                              ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed select-none opacity-60'
+                              : isSelected
+                              ? 'bg-emerald-700 text-white border-emerald-800 shadow-xs cursor-pointer'
+                              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100 hover:border-slate-300 cursor-pointer'
+                          }`}
+                        >
+                          <span className={isAlreadyCreated ? 'line-through decoration-slate-400' : ''}>{m}</span>
+                          {isAlreadyCreated ? (
+                            <span className="text-[9px] font-bold text-slate-500 bg-slate-200/80 px-1 py-0.2 rounded">
+                              Created
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <p className="text-[11px] text-emerald-800">
+                    A separate pending payment transaction of <b>BDT {demandAmount}</b> will be generated for each selected month per member.
+                  </p>
+                </div>
+              )}
+
+              {demandCategory === 'one_time' && (
+                <div className="space-y-1.5 p-3.5 bg-slate-50 border border-slate-200 rounded-lg">
+                  <Label className="font-bold text-slate-900 text-xs">Payment Title / Purpose</Label>
+                  <Input
+                    placeholder="e.g. Annual General Meeting Fee, Special Welfare Fund"
+                    value={oneTimeTitle}
+                    onChange={(e) => setOneTimeTitle(e.target.value)}
+                    className="bg-white text-sm"
+                    required
+                  />
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label className="font-bold text-slate-900 text-xs">
+                    {demandCategory === 'monthly_payment' ? 'Amount per Month (BDT)' : 'Total Amount (BDT)'}
+                  </Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    placeholder="2000"
+                    value={demandAmount}
+                    onChange={(e) => setDemandAmount(e.target.value)}
+                    className="bg-white mt-1 text-sm font-bold"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <Label className="font-bold text-slate-900 text-xs">Due Date</Label>
+                  <Input
+                    type="date"
+                    value={demandDueDate}
+                    onChange={(e) => setDemandDueDate(e.target.value)}
+                    className="bg-white mt-1 text-sm"
+                    required
+                  />
+                </div>
               </div>
 
               <div>
-                <Label className="text-xs font-bold text-slate-700">Receipt Date</Label>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs text-slate-600">Custom Transaction No (Optional)</Label>
+                  <button
+                    type="button"
+                    onClick={generateAutoTrxNo}
+                    className="text-[11px] font-bold text-emerald-700 hover:underline cursor-pointer flex items-center gap-1"
+                  >
+                    <Sparkles className="h-3 w-3" /> Auto Generate
+                  </button>
+                </div>
                 <Input
-                  type="date"
-                  {...register('receipt_date')}
-                  className="mt-1 bg-white text-xs"
-                  required
+                  placeholder="e.g. TRX-20250101-1001 (Leave blank for auto)"
+                  value={demandTrxNo}
+                  onChange={(e) => setDemandTrxNo(e.target.value)}
+                  className="bg-white mt-1 text-xs font-mono"
                 />
-                {errors.receipt_date && (
-                  <p className="text-xs text-red-600 mt-0.5">{String(errors.receipt_date.message)}</p>
-                )}
               </div>
 
-              <DialogFooter className="pt-2">
+              <div>
+                <Label className="text-xs text-slate-600">Additional Instructions / Notes (Optional)</Label>
+                <Input
+                  placeholder="e.g. Please pay before the monthly society meeting."
+                  value={demandDescription}
+                  onChange={(e) => setDemandDescription(e.target.value)}
+                  className="bg-white mt-1 text-sm"
+                />
+              </div>
+
+              <DialogFooter className="pt-2 flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2">
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => setOpenNewModal(false)}
-                  className="cursor-pointer text-xs"
+                  onClick={() => setOpenDemand(false)}
+                  className="cursor-pointer"
                 >
                   Cancel
                 </Button>
                 <Button
                   type="submit"
-                  disabled={isCreating}
-                  className="cursor-pointer bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs"
+                  disabled={isGenerating}
+                  className="cursor-pointer bg-emerald-700 hover:bg-emerald-800 text-slate-50"
                 >
-                  {isCreating ? 'Issuing...' : 'Save & Issue Receipt'}
+                  {isGenerating ? 'Generating...' : 'Assign & Send Pending Dues'}
                 </Button>
               </DialogFooter>
             </form>
           </DialogContent>
         </Dialog>
 
-        {/* DIALOG: COLLECT / SETTLE PAYMENT & ISSUE RECEIPT */}
-        <Dialog open={openCollectModal} onOpenChange={setOpenCollectModal}>
-          <DialogContent className={collectingTrx?.receipt_photo ? "w-[96vw] max-w-6xl xl:max-w-7xl max-h-[95vh] overflow-y-auto p-5 sm:p-6" : "max-w-lg"}>
+        {/* DIALOG 2: MANUAL RECORD TRANSACTION */}
+        <Dialog open={openSingle} onOpenChange={setOpenSingle}>
+          <DialogContent className="max-w-md">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-emerald-800 text-lg font-bold">
-                <Wallet className="h-5 w-5 text-emerald-700" />
+              <DialogTitle className="flex items-center gap-2 text-slate-900">
+                <PlusCircle className="h-5 w-5 text-emerald-700" />
+                <span>Record Manual Transaction</span>
+              </DialogTitle>
+            </DialogHeader>
+            <form onSubmit={handleSubmitSingle(onSubmitSingle)} className="space-y-3 pt-2">
+              <div>
+                <Label className="text-xs font-bold text-slate-700">Member</Label>
+                <select className="w-full border border-slate-200 rounded-md p-2 bg-white text-xs mt-1" {...registerSingle('member_id')}>
+                  <option value="">Select member</option>
+                  {membersList.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} (ID: {u.member_profile?.member_no || 'No ID'})
+                    </option>
+                  ))}
+                </select>
+                {errorsSingle.member_id && <p className="text-xs text-red-600 mt-1">{String(errorsSingle.member_id.message)}</p>}
+              </div>
+
+              <div>
+                <Label className="text-xs font-bold text-slate-700">Type</Label>
+                <select className="w-full border border-slate-200 rounded-md p-2 bg-white text-xs mt-1" {...registerSingle('type')}>
+                  {['payment', 'share', 'fdr', 'expense', 'other'].map((t) => (
+                    <option key={t} value={t} className="capitalize">{t}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <Label className="text-xs font-bold text-slate-700">Amount (BDT)</Label>
+                <Input type="number" step="0.01" placeholder="0.00" {...registerSingle('amount')} className="bg-white mt-1 text-sm font-bold font-mono" />
+                {errorsSingle.amount && <p className="text-xs text-red-600 mt-1">{String(errorsSingle.amount.message)}</p>}
+              </div>
+
+              <div>
+                <Label className="text-xs font-bold text-slate-700">Transaction Date</Label>
+                <Input type="date" {...registerSingle('transaction_date')} className="bg-white mt-1 text-xs" />
+                {errorsSingle.transaction_date && <p className="text-xs text-red-600 mt-1">{String(errorsSingle.transaction_date.message)}</p>}
+              </div>
+
+              <div>
+                <Label className="text-xs font-bold text-slate-700">Description</Label>
+                <Input placeholder="Optional notes / transaction details" {...registerSingle('description')} className="bg-white mt-1 text-xs" />
+              </div>
+
+              <DialogFooter className="pt-2">
+                <Button type="button" variant="outline" onClick={() => setOpenSingle(false)} className="cursor-pointer">
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={isCreatingSingle} className="cursor-pointer bg-emerald-700 hover:bg-emerald-800 text-white">
+                  {isCreatingSingle ? 'Saving...' : 'Save Transaction'}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        {/* DIALOG 3: EDIT SINGLE TRANSACTION / PRICE MODAL */}
+        <Dialog open={openEditTrxModal} onOpenChange={setOpenEditTrxModal}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-slate-900">
+                <Edit2 className="h-5 w-5 text-emerald-700" />
+                <span>Edit Transaction &amp; Price</span>
+              </DialogTitle>
+            </DialogHeader>
+
+            {editingTrx && (
+              <form onSubmit={handleSaveEditTrx} className="space-y-4 pt-1">
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Transaction No:</span>
+                    <strong className="font-mono text-slate-900">{editingTrx.transaction_no}</strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Member:</span>
+                    <strong className="text-slate-900">{editingTrx.member?.name || 'Unassigned'}</strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Status:</span>
+                    <span className="font-bold uppercase text-slate-700">{editingTrx.status}</span>
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="font-bold text-slate-900 text-xs">Transaction Amount / Price (BDT) *</Label>
+                  <div className="relative mt-1">
+                    <span className="absolute left-3 top-2 text-xs font-bold text-slate-400">BDT</span>
+                    <Input
+                      type="number"
+                      min="1"
+                      step="any"
+                      value={editTrxAmount}
+                      onChange={(e) => setEditTrxAmount(e.target.value)}
+                      required
+                      className="pl-12 font-bold font-mono text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="font-bold text-slate-900 text-xs">Description / Month</Label>
+                  <Input
+                    type="text"
+                    value={editTrxDescription}
+                    onChange={(e) => setEditTrxDescription(e.target.value)}
+                    className="mt-1 text-xs"
+                  />
+                </div>
+
+                <div>
+                  <Label className="font-bold text-slate-900 text-xs">Transaction / Due Date</Label>
+                  <Input
+                    type="date"
+                    value={editTrxDueDate}
+                    onChange={(e) => setEditTrxDueDate(e.target.value)}
+                    className="mt-1 text-xs"
+                  />
+                </div>
+
+                <DialogFooter className="pt-2">
+                  <Button type="button" variant="outline" onClick={() => setOpenEditTrxModal(false)} className="cursor-pointer">
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={isUpdating} className="cursor-pointer bg-emerald-700 hover:bg-emerald-800 text-white">
+                    {isUpdating ? 'Saving...' : 'Update Price & Details'}
+                  </Button>
+                </DialogFooter>
+              </form>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* DIALOG 4: EDIT BATCH GROUP DEMAND PRICE MODAL */}
+        <Dialog open={openEditGroupModal} onOpenChange={setOpenEditGroupModal}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-slate-900">
+                <Edit2 className="h-5 w-5 text-emerald-700" />
+                <span>Edit Demand Price for Assigned Members</span>
+              </DialogTitle>
+            </DialogHeader>
+
+            {editingGroup && (
+              <form onSubmit={handleSaveEditGroup} className="space-y-4 pt-1">
+                <div className="p-3.5 bg-emerald-50/60 border border-emerald-200 rounded-lg text-xs space-y-1.5">
+                  <div className="font-bold text-emerald-950 text-sm">{editingGroup.title}</div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>Total Assigned Members:</span>
+                    <strong className="font-mono text-slate-900">{editingGroup.totalMembersAssigned}</strong>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>Unpaid / Pending Members:</span>
+                    <strong className="font-mono text-amber-900">{editingGroup.pendingCount}</strong>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>Cleared / Paid Members:</span>
+                    <strong className="font-mono text-emerald-800">{editingGroup.paidCount}</strong>
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="font-bold text-slate-900 text-xs">New Fee / Price per Member (BDT) *</Label>
+                  <div className="relative mt-1">
+                    <span className="absolute left-3 top-2 text-xs font-bold text-slate-400">BDT</span>
+                    <Input
+                      type="number"
+                      min="1"
+                      step="any"
+                      value={editGroupAmount}
+                      onChange={(e) => setEditGroupAmount(e.target.value)}
+                      required
+                      className="pl-12 font-bold font-mono text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2 p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs">
+                  <label className="flex items-start gap-2 cursor-pointer select-none">
+                    <input
+                      type="radio"
+                      name="editGroupScope"
+                      checked={editGroupOnlyUnpaid}
+                      onChange={() => setEditGroupOnlyUnpaid(true)}
+                      className="mt-0.5 text-emerald-700 focus:ring-emerald-700"
+                    />
+                    <div>
+                      <span className="font-semibold text-slate-900 block">Only Update Unpaid / Pending Dues (Recommended)</span>
+                      <span className="text-[11px] text-slate-500">Preserves existing settled receipts without altering already paid amounts.</span>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-2 cursor-pointer select-none">
+                    <input
+                      type="radio"
+                      name="editGroupScope"
+                      checked={!editGroupOnlyUnpaid}
+                      onChange={() => setEditGroupOnlyUnpaid(false)}
+                      className="mt-0.5 text-emerald-700 focus:ring-emerald-700"
+                    />
+                    <div>
+                      <span className="font-semibold text-slate-900 block">Update All Assigned Records</span>
+                      <span className="text-[11px] text-slate-500">Applies new price to all records regardless of current status.</span>
+                    </div>
+                  </label>
+                </div>
+
+                <DialogFooter className="pt-2">
+                  <Button type="button" variant="outline" onClick={() => setOpenEditGroupModal(false)} className="cursor-pointer">
+                    Cancel
+                  </Button>
+                  <Button type="submit" disabled={isUpdating} className="cursor-pointer bg-emerald-700 hover:bg-emerald-800 text-white">
+                    {isUpdating ? 'Updating...' : 'Save New Price'}
+                  </Button>
+                </DialogFooter>
+              </form>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {/* DIALOG 5: DELETE CONFIRMATION MODAL */}
+        <Dialog open={openDeleteModal} onOpenChange={setOpenDeleteModal}>
+          <DialogContent className="max-w-md border-red-200">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-red-900">
+                <Trash2 className="h-5 w-5 text-red-600" />
+                <span>Confirm Delete</span>
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="space-y-3 pt-1 text-xs">
+              {deletingTrx && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg space-y-1">
+                  <p className="text-red-950 font-medium">Are you sure you want to delete this transaction record?</p>
+                  <div className="text-slate-700 space-y-0.5 pt-1 font-mono">
+                    <div>Trx No: <strong>{deletingTrx.transaction_no}</strong></div>
+                    <div>Member: <strong>{deletingTrx.member?.name || 'Unassigned'}</strong></div>
+                    <div>Amount: <strong>BDT {Number(deletingTrx.amount).toLocaleString()}</strong></div>
+                    <div>Status: <strong className="uppercase">{deletingTrx.status}</strong></div>
+                  </div>
+                </div>
+              )}
+
+              {deletingGroup && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg space-y-1">
+                  <p className="text-red-950 font-medium">
+                    Are you sure you want to delete this entire billing demand and all its assigned records?
+                  </p>
+                  <div className="text-slate-700 space-y-0.5 pt-1">
+                    <div>Demand Title: <strong className="text-red-950">{deletingGroup.title}</strong></div>
+                    <div>Total Assigned Records: <strong className="font-mono text-red-950">{deletingGroup.transactions.length}</strong></div>
+                    <div>Total Target Amount: <strong className="font-mono text-red-950">BDT {deletingGroup.totalDemandAmount.toLocaleString()}</strong></div>
+                  </div>
+                </div>
+              )}
+
+              <p className="text-slate-500 italic text-[11px]">
+                * This action will permanently remove the record(s) from the system.
+              </p>
+            </div>
+
+            <DialogFooter className="pt-2">
+              <Button type="button" variant="outline" onClick={() => setOpenDeleteModal(false)} className="cursor-pointer">
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={isDeletingTrx}
+                onClick={handleConfirmDelete}
+                className="cursor-pointer bg-red-600 hover:bg-red-700 text-white"
+              >
+                {isDeletingTrx ? 'Deleting...' : 'Yes, Delete'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* DIALOG 6: COLLECT / SETTLE PAYMENT & ISSUE RECEIPT */}
+        <Dialog open={openCollectModal} onOpenChange={setOpenCollectModal}>
+          <DialogContent className={collectingTrx?.receipt_photo ? "w-[98vw] max-w-7xl xl:max-w-[1600px] 2xl:max-w-[1750px] max-h-[96vh] overflow-y-auto p-6 sm:p-8" : "w-[95vw] max-w-2xl sm:max-w-3xl max-h-[94vh] overflow-y-auto p-6 sm:p-8"}>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2.5 text-emerald-800 text-xl font-bold">
+                <Wallet className="h-6 w-6 text-emerald-700" />
                 Collect Payment &amp; Issue Official Receipt
               </DialogTitle>
             </DialogHeader>
 
             {collectingTrx && (
-              <div className={collectingTrx.receipt_photo ? "grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch pt-2" : "pt-1"}>
+              <div className={collectingTrx.receipt_photo ? "grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch pt-2" : "pt-1"}>
                 
                 {/* LEFT SIDE: Full Image Slip Preview with 2.5x Magnifier */}
                 {collectingTrx.receipt_photo && (
-                  <div className="lg:col-span-6 flex flex-col justify-between bg-slate-950 border border-slate-800 rounded-2xl p-4 shadow-inner text-white min-h-[500px] h-full">
-                    <div className="flex items-center justify-between pb-2.5 border-b border-slate-800 text-xs">
-                      <span className="font-bold text-emerald-400 flex items-center gap-1.5">
-                        <ImageIcon className="h-4 w-4 text-emerald-400" /> Member Payment Slip
+                  <div className="lg:col-span-6 flex flex-col justify-between bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-inner text-white min-h-[560px] h-full">
+                    <div className="flex items-center justify-between pb-3 border-b border-slate-800 text-xs">
+                      <span className="font-bold text-emerald-400 flex items-center gap-1.5 text-sm">
+                        <ImageIcon className="h-4.5 w-4.5 text-emerald-400" /> Member Payment Slip
                       </span>
                       {collectingTrx.receipt_photo_uploaded_at && (
-                        <span className="text-[11px] text-slate-400 font-mono">
+                        <span className="text-xs text-slate-400 font-mono">
                           {collectingTrx.receipt_photo_uploaded_at}
                         </span>
                       )}
                     </div>
 
-                    <div className="py-3 my-auto w-full flex-1 flex items-center justify-center">
+                    <div className="py-4 my-auto w-full flex-1 flex items-center justify-center">
                       <MagnifiableModalImage
                         src={collectingTrx.receipt_photo}
                         alt={`${collectingTrx.member?.name || 'Member'} Slip`}
                         zoomScale={2.5}
-                        className="min-h-[420px] max-h-[560px] w-full"
+                        className="min-h-[460px] max-h-[620px] w-full"
                       />
                     </div>
 
@@ -2601,74 +3544,74 @@ export default function AdminReceiptsPage() {
                 <div className={collectingTrx.receipt_photo ? "lg:col-span-6 flex flex-col justify-between" : ""}>
                   <form onSubmit={handleConfirmCollectPayment} className="space-y-4">
                     {/* Transaction Summary Card */}
-                    <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-2 text-xs">
+                    <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-2.5 text-sm">
                       <div className="flex items-center justify-between">
-                        <span className="font-bold text-sm text-emerald-950">
+                        <span className="font-bold text-base sm:text-lg text-emerald-950">
                           Member: {collectingTrx.member?.name}
                         </span>
-                        <span className="font-mono text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-bold">
+                        <span className="font-mono text-xs bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-md font-bold border border-emerald-200">
                           ID: {collectingTrx.member?.member_no || 'N/A'}
                         </span>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2 text-[11px] text-emerald-900 pt-1 border-t border-emerald-200/80">
+                      <div className="grid grid-cols-2 gap-2.5 text-sm text-emerald-900 pt-2 border-t border-emerald-200/80">
                         <div>
-                          <span className="text-slate-500">Transaction No:</span>{' '}
+                          <span className="text-slate-500 font-medium">Transaction No:</span>{' '}
                           <span className="font-mono font-bold">{collectingTrx.transaction_no}</span>
                         </div>
                         <div>
-                          <span className="text-slate-500">Fee Item:</span>{' '}
+                          <span className="text-slate-500 font-medium">Fee Item:</span>{' '}
                           <span className="font-bold">{collectingTrx.month || collectingTrx.description || 'Monthly Fee'}</span>
                         </div>
                         <div>
-                          <span className="text-slate-500">Due Amount:</span>{' '}
-                          <span className="font-bold font-mono">BDT {Number(collectingTrx.amount).toLocaleString()}</span>
+                          <span className="text-slate-500 font-medium">Due Amount:</span>{' '}
+                          <span className="font-bold font-mono text-emerald-950">BDT {Number(collectingTrx.amount).toLocaleString()}</span>
                         </div>
                         <div>
-                          <span className="text-slate-500">Due Date:</span>{' '}
-                          <span>{collectingTrx.transaction_date}</span>
+                          <span className="text-slate-500 font-medium">Due Date:</span>{' '}
+                          <span className="font-semibold">{collectingTrx.transaction_date}</span>
                         </div>
                       </div>
                     </div>
 
                     {/* Member Proof Auto-filled Note Banner (if member submitted proof details) */}
                     {(collectingTrx.receipt_photo || collectingTrx.member_paid_amount || collectingTrx.member_trx_reference || collectingTrx.member_comment) && (
-                      <div className="p-3 bg-emerald-50/90 border border-emerald-300 rounded-xl space-y-1.5 text-xs shadow-2xs">
-                        <div className="flex items-center justify-between font-bold text-emerald-950">
-                          <span className="flex items-center gap-1.5">
-                            <CheckCircle2 className="h-4 w-4 text-emerald-700" />
-                            Member Proof Auto-Filled (Review & Confirm)
+                      <div className="p-3.5 bg-emerald-50/90 border border-emerald-300 rounded-xl space-y-2 text-sm shadow-2xs">
+                        <div className="flex items-center justify-between font-bold text-emerald-950 text-sm sm:text-base">
+                          <span className="flex items-center gap-2">
+                            <CheckCircle2 className="h-5 w-5 text-emerald-700 shrink-0" />
+                            Member Proof Auto-Filled (Review &amp; Confirm)
                           </span>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px] text-emerald-900 pt-0.5">
-                          <div>Submitted Amount: <b>BDT {Number(collectingTrx.member_paid_amount || collectingTrx.amount).toLocaleString()}</b></div>
-                          <div>Payment Type: <b className="capitalize">{collectingTrx.member_payment_method?.replace(/_/g, ' ') || 'Not specified'}</b></div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-emerald-900 pt-1">
+                          <div>Submitted Amount: <b className="text-emerald-950">BDT {Number(collectingTrx.member_paid_amount || collectingTrx.amount).toLocaleString()}</b></div>
+                          <div>Payment Type: <b className="capitalize text-emerald-950">{collectingTrx.member_payment_method?.replace(/_/g, ' ') || 'Not specified'}</b></div>
                           {collectingTrx.member_trx_reference && (
-                            <div className="sm:col-span-2 font-mono">Reference / TrxID: <b>{collectingTrx.member_trx_reference}</b></div>
+                            <div className="sm:col-span-2 font-mono">Reference / TrxID: <b className="text-emerald-950">{collectingTrx.member_trx_reference}</b></div>
                           )}
                           {collectingTrx.member_comment && (
-                            <div className="sm:col-span-2">Member Note: <i>&ldquo;{collectingTrx.member_comment}&rdquo;</i></div>
+                            <div className="sm:col-span-2">Member Note: <i className="text-emerald-950 font-semibold">&ldquo;{collectingTrx.member_comment}&rdquo;</i></div>
                           )}
                         </div>
 
-                        <p className="text-[10px] text-emerald-700 italic border-t border-emerald-200/80 pt-1">
+                        <p className="text-xs text-emerald-700 italic border-t border-emerald-200/80 pt-1.5 leading-relaxed">
                           * The fields below have been auto-filled with these member details. You can adjust any value before confirming settlement.
                         </p>
                       </div>
                     )}
 
-                    <div className="space-y-3">
+                    <div className="space-y-3.5">
                       <div>
                         <div className="flex items-center justify-between">
-                          <Label className="text-xs font-bold text-slate-700 flex items-center gap-1">
-                            <Calculator className="h-3.5 w-3.5 text-emerald-700" />
+                          <Label className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                            <Calculator className="h-4 w-4 text-emerald-700" />
                             Collected Amount (BDT) <span className="text-rose-600">*</span>
                           </Label>
                           <button
                             type="button"
                             onClick={() => setPaidAmountInput(String(collectingTrx.amount))}
-                            className="text-[11px] font-bold text-emerald-800 hover:underline cursor-pointer bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200"
+                            className="text-xs font-bold text-emerald-800 hover:underline cursor-pointer bg-emerald-50 px-2.5 py-1 rounded border border-emerald-200"
                           >
                             Pay Full (BDT {Number(collectingTrx.amount).toLocaleString()})
                           </button>
@@ -2679,18 +3622,18 @@ export default function AdminReceiptsPage() {
                           value={paidAmountInput}
                           onChange={(e) => setPaidAmountInput(e.target.value)}
                           placeholder="e.g. 2000"
-                          className="mt-1 font-mono font-bold text-emerald-900 text-sm bg-white"
+                          className="mt-1.5 font-mono font-bold text-emerald-900 text-base h-10 bg-white"
                           required
                         />
                       </div>
 
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <Label className="text-xs font-bold text-slate-700">Payment Method</Label>
+                          <Label className="text-sm font-bold text-slate-800">Payment Method</Label>
                           <select
                             value={paymentMethodInput}
                             onChange={(e) => setPaymentMethodInput(e.target.value as any)}
-                            className="w-full border border-slate-300 rounded-md p-2 text-xs bg-white mt-1 capitalize"
+                            className="w-full border border-slate-300 rounded-md p-2.5 text-sm bg-white mt-1.5 capitalize h-10"
                           >
                             <option value="cash">Cash</option>
                             <option value="bank">Bank Transfer</option>
@@ -2700,42 +3643,54 @@ export default function AdminReceiptsPage() {
                         </div>
 
                         <div>
-                          <Label className="text-xs font-bold text-slate-700">Settlement Date</Label>
+                          <Label className="text-sm font-bold text-slate-800">Settlement Date</Label>
                           <Input
                             type="date"
                             value={paymentDateInput}
                             onChange={(e) => setPaymentDateInput(e.target.value)}
-                            className="mt-1 text-xs bg-white"
+                            className="mt-1.5 text-sm bg-white h-10"
                             required
                           />
                         </div>
                       </div>
 
-                      <div>
-                        <Label className="text-xs font-bold text-slate-700">Payment Notes / Trx Reference</Label>
-                        <Input
-                          type="text"
-                          value={paymentNotesInput}
-                          onChange={(e) => setPaymentNotesInput(e.target.value)}
-                          placeholder="e.g. Verified via Bank statement / bKash TrxID"
-                          className="mt-1 text-xs bg-white"
-                        />
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <Label className="text-sm font-bold text-slate-800">Transaction Reference / TrxID</Label>
+                          <Input
+                            type="text"
+                            value={paymentTrxRefInput}
+                            onChange={(e) => setPaymentTrxRefInput(e.target.value)}
+                            placeholder="e.g. bKash TrxID, Bank Ref, etc."
+                            className="mt-1.5 text-sm bg-white font-mono h-10"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-sm font-bold text-slate-800">Admin Settlement Note (Optional)</Label>
+                          <Input
+                            type="text"
+                            value={paymentNotesInput}
+                            onChange={(e) => setPaymentNotesInput(e.target.value)}
+                            placeholder="e.g. Verified via Bank statement / Office deposit"
+                            className="mt-1.5 text-sm bg-white h-10"
+                          />
+                        </div>
                       </div>
                     </div>
 
-                    <DialogFooter className="pt-2">
+                    <DialogFooter className="pt-3">
                       <Button
                         type="button"
                         variant="outline"
                         onClick={() => setOpenCollectModal(false)}
-                        className="cursor-pointer text-xs"
+                        className="cursor-pointer text-sm h-10 px-4"
                       >
                         Cancel
                       </Button>
                       <Button
                         type="submit"
                         disabled={isCollecting}
-                        className="cursor-pointer bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs"
+                        className="cursor-pointer bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm h-10 px-5"
                       >
                         {isCollecting ? 'Processing...' : 'Confirm & Settle Payment'}
                       </Button>
@@ -2747,7 +3702,7 @@ export default function AdminReceiptsPage() {
           </DialogContent>
         </Dialog>
 
-        {/* DIALOG: REJECT PAYMENT PROOF SLIP */}
+        {/* DIALOG 7: REJECT PAYMENT PROOF SLIP */}
         <Dialog open={openRejectModal} onOpenChange={setOpenRejectModal}>
           <DialogContent className="max-w-lg">
             <DialogHeader>
@@ -2851,7 +3806,7 @@ export default function AdminReceiptsPage() {
           </DialogContent>
         </Dialog>
 
-        {/* LIGHTBOX PHOTO VIEWER */}
+        {/* DIALOG 8: LIGHTBOX PHOTO VIEWER */}
         <Dialog open={openPhotoModal} onOpenChange={setOpenPhotoModal}>
           <DialogContent className={`max-w-2xl max-h-[92vh] overflow-y-auto ${
             photoModalIsRejected ? 'border-red-500/60 shadow-2xl' : ''
