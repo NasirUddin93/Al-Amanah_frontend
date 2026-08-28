@@ -393,6 +393,8 @@ export default function AdminTransactionsPage() {
 
   const createdDemandGroups = useMemo(() => {
     const groups: Record<string, {
+      id?: number | string;
+      transaction_no?: string;
       key: string;
       title: string;
       category: string;
@@ -428,6 +430,8 @@ export default function AdminTransactionsPage() {
         }
 
         groups[groupKey] = {
+          id: t.id,
+          transaction_no: t.transaction_no,
           key: groupKey,
           title,
           category: t.payment_category || t.type,
@@ -502,12 +506,32 @@ export default function AdminTransactionsPage() {
         : (totalCollectedAmount > 0 ? 100 : 0);
       const isFullyPaid = pendingMembersCount === 0 && totalMembersAssigned > 0;
 
+      // Calculate 5-status count breakdown for each demand group
+      let duePendingCount = 0;
+      let receivedSlipCount = 0;
+      let rejectedCount = 0;
+
+      Object.entries(memberStatusMap).forEach(([mId, st]) => {
+        if (st.hasPaid && !st.hasPending) {
+          return;
+        }
+        const mTrxList = g.transactions.filter((t) => (String(t.member?.id) === String(mId) || String((t as any).member_id) === String(mId)));
+        const hasSlip = mTrxList.some((t) => t.status === 'pending' && !!t.receipt_photo);
+        const isRej = mTrxList.some((t) => t.status === 'rejected');
+        if (hasSlip) receivedSlipCount += 1;
+        else if (isRej) rejectedCount += 1;
+        else duePendingCount += 1;
+      });
+
       return {
         ...g,
         totalMembersAssigned,
         paidCount: fullyPaidMembersCount,
         partiallyPaidCount: partiallyPaidMembersCount,
         pendingCount: pendingMembersCount,
+        duePendingCount,
+        receivedSlipCount,
+        rejectedCount,
         totalDemandAmount,
         totalCollectedAmount,
         progressPercent,
@@ -674,13 +698,6 @@ export default function AdminTransactionsPage() {
             >
               <CalendarCheck className="h-4 w-4" /> Create / Assign Payment
             </Button>
-            <Button
-              variant="outline"
-              onClick={() => setOpenSingle(true)}
-              className="flex items-center gap-1.5 cursor-pointer border-slate-200"
-            >
-              <PlusCircle className="h-4 w-4 text-slate-600" /> Manual Record
-            </Button>
           </div>
         )}
       </div>
@@ -840,11 +857,17 @@ export default function AdminTransactionsPage() {
                                     ? 'One-Time'
                                     : group.category}
                                 </Badge>
+                                {(group.transaction_no || group.id) && (
+                                  <span className="text-[11px] font-mono text-slate-500">
+                                    #{group.transaction_no || group.id}
+                                  </span>
+                                )}
                               </div>
-                              <div className="text-[11px] text-slate-500 flex items-center gap-2">
-                                <span className="font-semibold text-emerald-800 font-mono">BDT {group.perMemberAmount.toLocaleString()} / member</span>
-                                {group.dueDate && <span>• Due: {group.dueDate}</span>}
-                              </div>
+                              {group.dueDate && (
+                                <div className="text-[11px] text-slate-500 flex items-center gap-2">
+                                  <span>Due: {group.dueDate}</span>
+                                </div>
+                              )}
                             </div>
                           </TableCell>
 
@@ -905,10 +928,77 @@ export default function AdminTransactionsPage() {
                                 )}
                               </div>
 
-                              <div className="text-[10px] text-slate-500 flex justify-between">
-                                <span>Collected: BDT {group.totalCollectedAmount.toLocaleString()}</span>
-                                <span>Target: BDT {group.totalDemandAmount.toLocaleString()}</span>
-                              </div>
+                                <div className="flex items-center justify-between text-[11px] pt-0.5">
+                                  <span className="text-emerald-700 font-bold">
+                                    Collected: BDT {group.totalCollectedAmount.toLocaleString()}
+                                  </span>
+                                  <span className="text-slate-600 font-semibold">
+                                    Target: BDT {group.totalDemandAmount.toLocaleString()}
+                                  </span>
+                                </div>
+
+                                {/* 5 Status Counters in their own distinct theme colors */}
+                                <div className="flex items-center gap-1 flex-wrap pt-1 border-t border-slate-200/80 text-[10px] font-bold">
+                                  <span
+                                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border transition-colors ${
+                                      group.paidCount > 0
+                                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-2xs'
+                                        : 'bg-slate-50 text-slate-400 border-slate-200'
+                                    }`}
+                                    title="Fully Paid / Cleared Members"
+                                  >
+                                    <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                                    {group.paidCount} Cleared
+                                  </span>
+
+                                  <span
+                                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border transition-colors ${
+                                      group.partiallyPaidCount > 0
+                                        ? 'bg-purple-50 text-purple-800 border-purple-300 shadow-2xs'
+                                        : 'bg-slate-50 text-slate-400 border-slate-200'
+                                    }`}
+                                    title="Partially Paid Members"
+                                  >
+                                    <Wallet className="h-3 w-3 text-purple-600" />
+                                    {group.partiallyPaidCount} Partial
+                                  </span>
+
+                                  <span
+                                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border transition-colors ${
+                                      group.receivedSlipCount > 0
+                                        ? 'bg-blue-50 text-blue-800 border-blue-300 shadow-2xs'
+                                        : 'bg-slate-50 text-slate-400 border-slate-200'
+                                    }`}
+                                    title="Payment Slip Received (Awaiting Confirmation)"
+                                  >
+                                    <FileCheck className="h-3 w-3 text-blue-600" />
+                                    {group.receivedSlipCount} Received
+                                  </span>
+
+                                  <span
+                                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border transition-colors ${
+                                      group.duePendingCount > 0
+                                        ? 'bg-amber-50 text-amber-900 border-amber-300 shadow-2xs'
+                                        : 'bg-slate-50 text-slate-400 border-slate-200'
+                                    }`}
+                                    title="Pending Unpaid Dues"
+                                  >
+                                    <Clock className="h-3 w-3 text-amber-600" />
+                                    {group.duePendingCount} Due
+                                  </span>
+
+                                  <span
+                                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border transition-colors ${
+                                      group.rejectedCount > 0
+                                        ? 'bg-red-50 text-red-800 border-red-300 shadow-2xs'
+                                        : 'bg-slate-50 text-slate-400 border-slate-200'
+                                    }`}
+                                    title="Rejected Proof Slips"
+                                  >
+                                    <XCircle className="h-3 w-3 text-red-600" />
+                                    {group.rejectedCount} Rejected
+                                  </span>
+                                </div>
                             </div>
                           </TableCell>
 

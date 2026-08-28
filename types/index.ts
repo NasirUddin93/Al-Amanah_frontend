@@ -87,7 +87,21 @@ export interface Receipt {
 }
 
 export interface MeetingExpense {
-  id: number; title: string; expense_date: string; amount: number; description?: string; created_by?: string;
+  id: number;
+  title: string;
+  expense_date: string;
+  created_at?: string;
+  amount: number;
+  description?: string;
+  created_by?: string;
+  created_by_id?: number;
+  creator?: {
+    id: number;
+    name: string;
+    email?: string;
+    member_no?: string;
+    role?: string;
+  };
 }
 
 export interface Fdr {

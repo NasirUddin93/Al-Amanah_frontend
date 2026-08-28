@@ -1,135 +1,240 @@
 'use client';
+
 import React, { useState, useMemo } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
+import Link from 'next/link';
 import { useAppSelector } from '@/store/hooks';
-import { canManageTransactions } from '@/lib/roles';
 import {
   useGetTransactionsQuery,
   useGetReceiptsQuery,
-  useCreateTransactionMutation,
-  useUpdateTransactionMutation,
-  useCollectPaymentMutation,
-  useUploadReceiptPhotoMutation,
-  useRejectReceiptPhotoMutation,
-  useDeleteTransactionMutation,
-  useGeneratePaymentsMutation,
   useGetUsersQuery,
   useGetSettingsQuery,
 } from '@/lib/api';
-import { transactionSchema } from '@/lib/schemas';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Card } from '@/components/ui/card';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import { ReceiptSlipThumbnail, MagnifiableModalImage } from '@/components/receipt-magnifier';
+import { ReportPrintArea, type PrintingReportData, type PrintSection, type PrintMonthSection, type PrintRowItem } from '@/components/report-print';
 import { ReceiptPrintArea } from '@/components/receipt-print';
 import type { Transaction, User, Receipt } from '@/types';
 import {
-  PlusCircle,
-  CalendarCheck,
-  Clock,
-  CheckCircle2,
-  AlertCircle,
-  Calendar as CalendarIcon,
-  CreditCard,
+  Receipt as ReceiptIcon,
   Users,
   Search,
+  Printer,
   ChevronDown,
   ChevronUp,
-  Check,
+  CheckCircle2,
+  XCircle,
+  Clock,
   Wallet,
-  UserCheck,
-  UserX,
-  Sparkles,
-  Layers,
-  ArrowRight,
-  TrendingUp,
-  Receipt as ReceiptIcon,
-  Calculator,
-  Camera,
-  Image as ImageIcon,
-  Upload,
-  Eye,
-  ZoomIn,
+  FileCheck,
+  FileText,
   FileImage,
   ExternalLink,
-  XCircle,
-  Ban,
-  FileCheck,
-  Printer,
+  Layers,
+  Sparkles,
+  Eye,
+  Filter,
 } from 'lucide-react';
 
-const MONTH_NAMES = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December'
-];
+interface MemberReceiptItem {
+  id: string | number;
+  recordType: 'receipt' | 'rejected_slip' | 'pending_slip';
+  receiptNo?: string;
+  transactionNo: string;
+  date: string;
+  monthOrDesc: string;
+  monthKey: string;
+  amount: number;
+  paymentMethod: string;
+  receiptPhoto?: string;
+  receiptPhotoUploadedAt?: string;
+  memberPaidAmount?: number;
+  memberTrxReference?: string;
+  inputtedReference?: string;
+  isRejected: boolean;
+  isPartial?: boolean;
+  rejectionReason?: string | null;
+  status: 'paid' | 'rejected' | 'pending' | 'partial' | 'partially_paid';
+  rawReceipt?: Receipt;
+  rawTransaction?: Transaction;
+}
+
+interface MonthGroup {
+  monthKey: string;
+  monthLabel: string;
+  campaignTrxNo?: string;
+  items: MemberReceiptItem[];
+  totalCount: number;
+  totalPaid: number;
+  totalDue: number;
+  netAmount: number;
+  fullyPaidCount: number;
+  partiallyPaidCount: number;
+  receivedSlipCount: number;
+  pureDuePendingCount: number;
+  rejectedCount: number;
+}
+
+interface MemberGroup {
+  memberId: number | string;
+  memberName: string;
+  memberNo: string;
+  memberRole?: string;
+  memberEmail?: string;
+  memberPhone?: string;
+  items: MemberReceiptItem[];
+  monthGroups: MonthGroup[];
+  totalCount: number;
+  totalPaid: number;
+  totalDue: number;
+  netAmount: number;
+  fullyPaidCount: number;
+  partiallyPaidCount: number;
+  receivedSlipCount: number;
+  pureDuePendingCount: number;
+  rejectedCount: number;
+  currentState?: 'cleared' | 'partial' | 'received' | 'due' | 'rejected';
+}
+
+const MONTH_MAP: Record<string, { num: string; name: string }> = {
+  january: { num: '01', name: 'January' },
+  february: { num: '02', name: 'February' },
+  march: { num: '03', name: 'March' },
+  april: { num: '04', name: 'April' },
+  may: { num: '05', name: 'May' },
+  june: { num: '06', name: 'June' },
+  july: { num: '07', name: 'July' },
+  august: { num: '08', name: 'August' },
+  september: { num: '09', name: 'September' },
+  october: { num: '10', name: 'October' },
+  november: { num: '11', name: 'November' },
+  december: { num: '12', name: 'December' },
+  jan: { num: '01', name: 'January' },
+  feb: { num: '02', name: 'February' },
+  mar: { num: '03', name: 'March' },
+  apr: { num: '04', name: 'April' },
+  jun: { num: '06', name: 'June' },
+  jul: { num: '07', name: 'July' },
+  aug: { num: '08', name: 'August' },
+  sep: { num: '09', name: 'September' },
+  oct: { num: '10', name: 'October' },
+  nov: { num: '11', name: 'November' },
+  dec: { num: '12', name: 'December' },
+};
+
+function parseMonthGrouping(descOrMonth: string, fallbackDate: string = '') {
+  const match = (descOrMonth || '').match(
+    /(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*(\d{4})?/i
+  );
+
+  if (match) {
+    const rawMonthName = match[1].toLowerCase();
+    const entry = MONTH_MAP[rawMonthName] || { num: '01', name: match[1] };
+    let yearNum = match[2];
+    if (!yearNum && fallbackDate && fallbackDate.length >= 4) {
+      yearNum = fallbackDate.slice(0, 4);
+    }
+    if (!yearNum) yearNum = '2026';
+    return {
+      key: `${yearNum}-${entry.num}`,
+      label: `[${yearNum}-${entry.num}] ${entry.name} ${yearNum}`,
+    };
+  }
+
+  if (fallbackDate && fallbackDate.length >= 7) {
+    const yyyymm = fallbackDate.slice(0, 7);
+    return {
+      key: yyyymm,
+      label: `[${yyyymm}] Billing Period (${yyyymm})`,
+    };
+  }
+
+  return {
+    key: '9999-99',
+    label: descOrMonth || 'General Society Assessment',
+  };
+}
+
+function extractInputtedReference(trx?: any, receipt?: any): string {
+  const directRef =
+    trx?.member_trx_reference ||
+    trx?.transaction_reference ||
+    trx?.reference ||
+    receipt?.member_trx_reference ||
+    receipt?.transaction_reference ||
+    receipt?.reference ||
+    '';
+
+  if (directRef && String(directRef).trim() !== '' && String(directRef).trim() !== '-') {
+    return String(directRef).trim();
+  }
+
+  const desc = trx?.description || receipt?.transaction?.description || '';
+  if (desc) {
+    const refMatches = Array.from(desc.matchAll(/Ref:\s*([^|\n-]+)/gi))
+      .map((m: any) => (m[1] ? String(m[1]).trim() : ''))
+      .filter(Boolean);
+    if (refMatches.length > 0) {
+      return refMatches[refMatches.length - 1];
+    }
+  }
+
+  if (receipt?.receipt_no && String(receipt.receipt_no).trim() !== '') {
+    return String(receipt.receipt_no).trim();
+  }
+
+  if (trx?.transaction_no && String(trx.transaction_no).trim() !== '') {
+    return String(trx.transaction_no).trim();
+  }
+
+  return '-';
+}
+
+function getModifierInfo(group: any) {
+  if (group.last_modified_by) {
+    const u = group.last_modified_by;
+    const name = u.name || u.email || 'Admin';
+    const role = u.role?.name === 'super_admin' ? 'Super Admin' : u.role?.name || 'Admin';
+    return { name, role, action: 'Updated' };
+  }
+  return { name: 'Super Admin', role: 'Super Admin', action: 'Created' };
+}
 
 export default function AdminTransactionsPage() {
   const user = useAppSelector((s) => s.auth.user);
-  const staff = canManageTransactions(user);
-  const isSuperAdmin = user?.role?.name === 'super_admin';
 
-  // Toggle View: 'created' (Created Demands & Progress) vs 'members_status' (Per-Member Matrix)
-  const [activeTab, setActiveTab] = useState<'created' | 'members_status'>('created');
+  // View Mode: 'created' (Campaign Demands) | 'members' (Member Folders) | 'all' (Flat Records)
+  const [activeTab, setActiveTab] = useState<'created' | 'members' | 'all'>('created');
 
-  // Tab 1: Created Demands Filters & State
-  const [createdStatusFilter, setCreatedStatusFilter] = useState<'all' | 'pending' | 'complete'>('all');
-  const [createdSearch, setCreatedSearch] = useState('');
+  // Status Filter: All, Cleared Receipts, Partially Paid, Received Slips, Due Pending, Rejected Slips
+  const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'partial' | 'received_slip' | 'pending' | 'rejected'>('all');
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState<'all' | 'cash' | 'bank' | 'mobile_banking' | 'other'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const [expandedMembers, setExpandedMembers] = useState<Record<string | number, boolean>>({});
+  const [expandedMonths, setExpandedMonths] = useState<Record<string, boolean>>({});
 
-  // Tab 2: Members Dues Matrix State
-  const [memberStatusFilter, setMemberStatusFilter] = useState<'all' | 'pending' | 'cleared' | 'rejected'>('all');
-  const [memberSearch, setMemberSearch] = useState('');
-  const [expandedMembers, setExpandedMembers] = useState<Record<number, boolean>>({});
-
-  // Query all transactions and official receipts with real-time live polling
-  const { data: allTrxData, isLoading: loadingAllTrx } = useGetTransactionsQuery(
-    { per_page: 3000 },
-    { pollingInterval: 3000 }
-  );
-  const { data: receiptsData, isLoading: loadingReceipts } = useGetReceiptsQuery(
-    { per_page: 3000 },
-    { pollingInterval: 3000 }
-  );
-
-  const [createTransaction, { isLoading: isCreatingSingle }] = useCreateTransactionMutation();
-  const [updateTransaction, { isLoading: isUpdating }] = useUpdateTransactionMutation();
-  const [collectPayment, { isLoading: isCollecting }] = useCollectPaymentMutation();
-  const [uploadReceiptPhoto, { isLoading: isUploadingPhoto }] = useUploadReceiptPhotoMutation();
-  const [rejectReceiptPhoto, { isLoading: isRejectingProof }] = useRejectReceiptPhotoMutation();
-  const [deleteTransaction] = useDeleteTransactionMutation();
-  const [generatePayments, { isLoading: isGenerating }] = useGeneratePaymentsMutation();
-  const { data: usersData, isLoading: loadingUsers } = useGetUsersQuery(
-    { per_page: 1000 },
-    { skip: !staff }
-  );
-  const { data: settings } = useGetSettingsQuery();
-
-  // Modals
-  const [openSingle, setOpenSingle] = useState(false);
-  const [openDemand, setOpenDemand] = useState(false);
+  // Printing & Lightbox State
+  const [printingReport, setPrintingReport] = useState<PrintingReportData | null>(null);
   const [printReceipt, setPrintReceipt] = useState<Receipt | null>(null);
 
-  // Rejection Modal State
-  const [openRejectModal, setOpenRejectModal] = useState(false);
-  const [rejectingTrx, setRejectingTrx] = useState<Transaction | null>(null);
-  const [rejectionReason, setRejectionReason] = useState<string>('Payment proof slip could not be verified by Admin. Please re-upload a clear slip.');
-
-  // Partial / Full Collection Modal State
-  const [openCollect, setOpenCollect] = useState(false);
-  const [collectingTrx, setCollectingTrx] = useState<Transaction | null>(null);
-  const [paidAmountInput, setPaidAmountInput] = useState<string>('');
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'bank' | 'mobile_banking' | 'other'>('cash');
-  const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [paymentNotes, setPaymentNotes] = useState<string>('');
-  const [createReceipt, setCreateReceipt] = useState<boolean>(true);
-  const [collectionReceiptPhoto, setCollectionReceiptPhoto] = useState<string | null>(null);
-
-  // Lightbox Receipt Photo Modal (View-only for Admins)
   const [openPhotoModal, setOpenPhotoModal] = useState(false);
   const [photoModalUrl, setPhotoModalUrl] = useState<string>('');
   const [photoModalTitle, setPhotoModalTitle] = useState<string>('');
@@ -137,363 +242,214 @@ export default function AdminTransactionsPage() {
   const [photoModalIsRejected, setPhotoModalIsRejected] = useState(false);
   const [photoModalRejectionReason, setPhotoModalRejectionReason] = useState<string | null>(null);
 
-  // Demand Generator Form State
-  const [demandCategory, setDemandCategory] = useState<'monthly_payment' | 'one_time'>('monthly_payment');
-  const [targetAllMembers, setTargetAllMembers] = useState(true);
-  const [selectedMemberId, setSelectedMemberId] = useState<string>('');
-  const [demandYear, setDemandYear] = useState<number>(new Date().getFullYear());
-  const [selectedMonths, setSelectedMonths] = useState<string[]>([
-    `${MONTH_NAMES[new Date().getMonth()]} ${new Date().getFullYear()}`
-  ]);
-  const [demandAmount, setDemandAmount] = useState<string>('2000');
-  const [oneTimeTitle, setOneTimeTitle] = useState<string>('Annual General Meeting Fee');
-  const [demandDueDate, setDemandDueDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [demandDescription, setDemandDescription] = useState<string>('');
+  // Queries with polling interval
+  const { data: receiptsData, isLoading: loadingReceipts } = useGetReceiptsQuery(
+    { per_page: 3000 },
+    { pollingInterval: 3000 }
+  );
+  const { data: transactionsData, isLoading: loadingTransactions } = useGetTransactionsQuery(
+    { per_page: 3000 },
+    { pollingInterval: 3000 }
+  );
+  const { data: usersData } = useGetUsersQuery({ per_page: 1000 });
+  const { data: settings } = useGetSettingsQuery();
 
-  // Single Manual Transaction Form
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<any>({
-    resolver: zodResolver(transactionSchema),
-    defaultValues: { member_id: '', type: 'payment', amount: '', transaction_date: '', description: '' },
-  });
+  const rawReceipts: Receipt[] = useMemo(() => {
+    return receiptsData?.data || [];
+  }, [receiptsData]);
 
-  const onSubmitSingle = async (values: any) => {
-    try {
-      await createTransaction({
-        ...values,
-        member_id: Number(values.member_id),
-        amount: Number(values.amount),
-        status: 'paid',
-      }).unwrap();
-      setOpenSingle(false);
-      reset();
-    } catch (err: any) {
-      alert(err?.data?.message || 'Failed to record transaction.');
-    }
-  };
+  const rawTransactions: Transaction[] = useMemo(() => {
+    return transactionsData?.data || [];
+  }, [transactionsData]);
 
-  const handleToggleMonth = (monthWithYear: string) => {
-    if (selectedMonths.includes(monthWithYear)) {
-      setSelectedMonths(selectedMonths.filter((m) => m !== monthWithYear));
-    } else {
-      setSelectedMonths([...selectedMonths, monthWithYear]);
-    }
-  };
-
-  const handleSelectAllMonths = () => {
-    const all = MONTH_NAMES.map((m) => `${m} ${demandYear}`);
-    setSelectedMonths(all);
-  };
-
-  const handleClearMonths = () => {
-    setSelectedMonths([]);
-  };
-
-  const onSubmitDemand = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    const memberIds = targetAllMembers
-      ? ['all']
-      : selectedMemberId
-      ? [Number(selectedMemberId)]
-      : [];
-
-    if (!targetAllMembers && memberIds.length === 0) {
-      alert('Please select at least one member.');
-      return;
-    }
-
-    if (demandCategory === 'monthly_payment' && selectedMonths.length === 0) {
-      alert('Please select at least one month.');
-      return;
-    }
-
-    const numAmount = Number(demandAmount);
-    if (isNaN(numAmount) || numAmount <= 0) {
-      alert('Please enter a valid positive amount.');
-      return;
-    }
-
-    try {
-      const res = await generatePayments({
-        payment_category: demandCategory,
-        member_ids: memberIds,
-        amount: numAmount,
-        months: demandCategory === 'monthly_payment' ? selectedMonths : undefined,
-        title: demandCategory === 'one_time' ? oneTimeTitle : undefined,
-        due_date: demandDueDate,
-        description: demandDescription || undefined,
-      }).unwrap();
-
-      alert(`Success! Generated ${res.count} pending payment demands for members.`);
-      setOpenDemand(false);
-    } catch (err: any) {
-      alert(err?.data?.message || 'Failed to generate payment demands.');
-    }
-  };
-
-  const handlePrint = (
-    r?: Receipt | null,
-    fallbackTrx?: Transaction | null,
-    partialMeta?: {
-      isPartial?: boolean;
-      totalPaidAmount?: number;
-      previousPaidAmount?: number;
-      totalDueAmount?: number;
-      totalAssignedAmount?: number;
-      previousReferences?: (string | { ref: string; amount?: number; date?: string })[];
-    }
-  ) => {
-    let baseReceipt: Receipt;
-
-    if (r) {
-      const linkedTrx = fallbackTrx || (r.transaction?.id ? r.transaction : allTransactions.find((t) => t.id === (r as any).transaction_id || t.receipt?.id === r.id));
-      baseReceipt = {
-        ...r,
-        transaction: linkedTrx || r.transaction,
-      };
-    } else if (fallbackTrx) {
-      baseReceipt = {
-        id: fallbackTrx.id,
-        receipt_no: fallbackTrx.receipt?.receipt_no || `RCT-${fallbackTrx.transaction_no}`,
-        receipt_date: fallbackTrx.transaction_date || new Date().toISOString().split('T')[0],
-        amount: Number(fallbackTrx.amount || 0),
-        payment_method: (fallbackTrx.member_payment_method as any) || 'cash',
-        member: fallbackTrx.member,
-        transaction: fallbackTrx,
-        created_at: fallbackTrx.created_at,
-        updated_at: fallbackTrx.updated_at,
-      };
-    } else {
-      return;
-    }
-
-    const desc = baseReceipt.transaction?.description || fallbackTrx?.description || '';
-    const isPartialFromDesc = /partial payment/i.test(desc) || /remaining due/i.test(desc);
-    const isPartial = partialMeta?.isPartial ?? isPartialFromDesc;
-
-    // Parse partial amounts from description if available (e.g. "BDT 1000 of BDT 2000", "(Due: BDT 1000)")
-    let parsedAssigned = 0;
-    let parsedDue = 0;
-    const matchTotal = desc.match(/of\s+BDT\s+([\d,]+)/i);
-    if (matchTotal) {
-      parsedAssigned = Number(matchTotal[1].replace(/,/g, ''));
-    }
-    const matchDue = desc.match(/Due:\s*BDT\s*([\d,]+)/i);
-    if (matchDue) {
-      parsedDue = Number(matchDue[1].replace(/,/g, ''));
-    }
-
-    const installmentAmount = Number(baseReceipt.amount || 0);
-    const totalPaid = partialMeta?.totalPaidAmount ?? (parsedAssigned && parsedDue ? parsedAssigned - parsedDue : installmentAmount);
-    const totalDue = partialMeta?.totalDueAmount ?? parsedDue;
-    const totalAssigned = partialMeta?.totalAssignedAmount ?? (parsedAssigned || (totalPaid + totalDue));
-    const previousPaid = partialMeta?.previousPaidAmount ?? (totalPaid > installmentAmount ? totalPaid - installmentAmount : 0);
-
-    let previousReferences: (string | { ref: string; amount?: number; date?: string })[] = partialMeta?.previousReferences || [];
-    if (previousReferences.length === 0 && desc) {
-      const refMatches = Array.from(desc.matchAll(/Ref:\s*([^|\n-]+)/gi)).map((m) => m[1].trim()).filter(Boolean);
-      if (refMatches.length > 1) {
-        previousReferences = refMatches.slice(0, -1);
-      }
-    }
-
-    const enrichedReceipt: Receipt & {
-      isPartial?: boolean;
-      totalPaidAmount?: number;
-      previousPaidAmount?: number;
-      totalDueAmount?: number;
-      totalAssignedAmount?: number;
-      installmentAmount?: number;
-      previousReferences?: (string | { ref: string; amount?: number; date?: string })[];
-    } = {
-      ...baseReceipt,
-      isPartial,
-      totalPaidAmount: totalPaid,
-      previousPaidAmount: previousPaid,
-      totalDueAmount: totalDue,
-      totalAssignedAmount: totalAssigned,
-      installmentAmount: installmentAmount,
-      previousReferences: previousReferences,
-    };
-
-    setPrintReceipt(enrichedReceipt as any);
-
-    setTimeout(() => {
-      window.print();
-      setPrintReceipt(null);
-    }, 150);
-  };
-
-  // Open Collect Payment Modal (Auto-fill Member Proof Details for Admin)
-  const openCollectPaymentModal = (trx: Transaction) => {
-    setCollectingTrx(trx);
-
-    const defaultAmount =
-      trx.member_paid_amount !== null && trx.member_paid_amount !== undefined
-        ? String(trx.member_paid_amount)
-        : String(trx.amount);
-    setPaidAmountInput(defaultAmount);
-
-    const defaultMethod = (trx.member_payment_method as any) || 'cash';
-    setPaymentMethod(defaultMethod);
-
-    setPaymentDate(new Date().toISOString().split('T')[0]);
-
-    const noteParts: string[] = [];
-    if (trx.member_trx_reference) {
-      noteParts.push(`Ref: ${trx.member_trx_reference}`);
-    }
-    if (trx.member_comment) {
-      noteParts.push(`Note: ${trx.member_comment}`);
-    }
-    setPaymentNotes(noteParts.join(' | '));
-
-    setCreateReceipt(true);
-    setCollectionReceiptPhoto(trx.receipt_photo || null);
-    setOpenCollect(true);
-  };
-
-  // Open Lightbox Photo Viewer
-  const viewReceiptPhoto = (
-    url: string,
-    title: string,
-    date?: string,
-    isRejected?: boolean,
-    rejectionReason?: string | null
-  ) => {
-    setPhotoModalUrl(url);
-    setPhotoModalTitle(title);
-    setPhotoModalDate(date || '');
-    setPhotoModalIsRejected(!!isRejected);
-    setPhotoModalRejectionReason(rejectionReason || null);
-    setOpenPhotoModal(true);
-  };
-
-  // Open Rejection Confirmation Dialog
-  const openRejectProofModal = (trx: Transaction) => {
-    setRejectingTrx(trx);
-    setRejectionReason('Payment proof slip could not be verified by Admin. Please re-upload a clear slip.');
-    setOpenRejectModal(true);
-  };
-
-  // Confirm Rejection of Member Payment Proof Slip
-  const onConfirmRejectProof = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!rejectingTrx) return;
-
-    const confirmed = window.confirm(
-      `Are you sure you want to reject the payment proof slip for ${rejectingTrx.member?.name || 'Member'}?\n\nRejection Reason:\n"${rejectionReason}"\n\nThe slip will be marked as Rejected (Red) and a new pending due will be generated for them.`
-    );
-    if (!confirmed) return;
-
-    try {
-      const res = await rejectReceiptPhoto({
-        id: rejectingTrx.id,
-        body: { reason: rejectionReason },
-      }).unwrap();
-
-      alert(res.message || 'Payment proof slip rejected. Member has been notified to re-submit.');
-      setOpenRejectModal(false);
-      setRejectingTrx(null);
-      if (openCollect && collectingTrx?.id === rejectingTrx.id) {
-        setOpenCollect(false);
-        setCollectingTrx(null);
-      }
-    } catch (err: any) {
-      alert(err?.data?.message || 'Failed to reject payment proof.');
-    }
-  };
-
-  // Confirm Collection of Partial or Full Payment
-  const onConfirmCollection = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!collectingTrx) return;
-
-    const inputNum = Number(paidAmountInput);
-    if (isNaN(inputNum) || inputNum <= 0) {
-      alert('Please enter a valid payment amount greater than 0.');
-      return;
-    }
-
-    const memberName = collectingTrx.member?.name || 'Member';
-    const confirmed = window.confirm(
-      `Are you sure you want to collect and record payment of BDT ${inputNum.toLocaleString()} for ${memberName}?`
-    );
-    if (!confirmed) return;
-
-    try {
-      const res = await collectPayment({
-        id: collectingTrx.id,
-        body: {
-          paid_amount: inputNum,
-          payment_method: paymentMethod,
-          payment_date: paymentDate,
-          notes: paymentNotes || undefined,
-          create_receipt: createReceipt,
-        },
-      }).unwrap();
-
-      alert(res.message);
-      setOpenCollect(false);
-      setCollectingTrx(null);
-    } catch (err: any) {
-      alert(err?.data?.message || 'Failed to process payment.');
-    }
-  };
-
-  const toggleExpandGroup = (groupKey: string) => {
-    setExpandedGroups((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }));
-  };
-
-  const toggleExpandMember = (memberId: number) => {
-    setExpandedMembers((prev) => ({ ...prev, [memberId]: !prev[memberId] }));
-  };
-
-  const getModifierInfo = (t: Transaction | any) => {
-    if (t.last_modified_by && typeof t.last_modified_by === 'object') {
-      return {
-        name: t.last_modified_by.name,
-        role: t.last_modified_by.role || 'Admin',
-        action: t.last_modified_by.action || 'Created',
-      };
-    }
-
-    if (t.updated_by) {
-      if (typeof t.updated_by === 'object') {
-        return {
-          name: t.updated_by.name,
-          role: t.updated_by.role || 'Admin',
-          action: 'Updated',
-        };
-      }
-      return { name: String(t.updated_by), role: 'Admin', action: 'Updated' };
-    }
-
-    if (t.created_by) {
-      if (typeof t.created_by === 'object') {
-        return {
-          name: t.created_by.name,
-          role: t.created_by.role || 'Admin',
-          action: 'Created',
-        };
-      }
-      return { name: String(t.created_by), role: 'Admin', action: 'Created' };
-    }
-
-    return { name: 'Super Admin', role: 'super_admin', action: 'Created' };
-  };
-
-  const membersList = useMemo(() => {
+  const membersList: User[] = useMemo(() => {
     const rawUsers = usersData?.data || [];
     return rawUsers.filter((u) => u.role?.name === 'member');
   }, [usersData]);
 
-  const allTransactions = useMemo(() => {
-    return allTrxData?.data || [];
-  }, [allTrxData]);
+  // Build Comprehensive Member-wise Groups & Monthly Sub-sections
+  const memberReceiptGroups = useMemo(() => {
+    const map: Record<string | number, MemberGroup> = {};
 
+    membersList.forEach((m) => {
+      map[m.id] = {
+        memberId: m.id,
+        memberName: m.name,
+        memberNo: m.member_profile?.member_no || (m as any).memberProfile?.member_no || '-',
+        memberRole: (m.member_profile as any)?.role_designation || 'Member',
+        memberEmail: m.email,
+        memberPhone: (m as any).phone || (m.member_profile as any)?.phone || '-',
+        items: [],
+        monthGroups: [],
+        totalCount: 0,
+        totalPaid: 0,
+        totalDue: 0,
+        netAmount: 0,
+        fullyPaidCount: 0,
+        partiallyPaidCount: 0,
+        receivedSlipCount: 0,
+        pureDuePendingCount: 0,
+        rejectedCount: 0,
+      };
+    });
+
+    rawTransactions.forEach((trx) => {
+      const mId = trx.member?.id || (trx as any).member_id || `anon_${trx.member?.name || 'unknown'}`;
+      const mName = trx.member?.name || 'Unassigned Member';
+      const mNo = trx.member?.member_no || (trx.member as any)?.member_profile?.member_no || '-';
+
+      if (!map[mId]) {
+        map[mId] = {
+          memberId: mId,
+          memberName: mName,
+          memberNo: mNo,
+          memberRole: (trx.member as any)?.member_profile?.role_designation || 'Member',
+          memberEmail: (trx.member as any)?.email,
+          memberPhone: (trx.member as any)?.phone || '-',
+          items: [],
+          monthGroups: [],
+          totalCount: 0,
+          totalPaid: 0,
+          totalDue: 0,
+          netAmount: 0,
+          fullyPaidCount: 0,
+          partiallyPaidCount: 0,
+          receivedSlipCount: 0,
+          pureDuePendingCount: 0,
+          rejectedCount: 0,
+        };
+      }
+
+      const isPaid = trx.status === 'paid';
+      const isRejected = trx.status === 'rejected';
+      const isPartial = (trx as any).is_partial || (trx.description || '').toLowerCase().includes('partial');
+      const hasPhoto = Boolean(trx.receipt_photo);
+
+      const parsedMonth = parseMonthGrouping(trx.month || trx.description || '', trx.transaction_date);
+      const parsedRef = extractInputtedReference(trx);
+
+      const item: MemberReceiptItem = {
+        id: `trx_${trx.id}`,
+        recordType: isRejected ? 'rejected_slip' : (hasPhoto && !isPaid ? 'pending_slip' : 'receipt'),
+        receiptNo: trx.transaction_no,
+        transactionNo: trx.transaction_no,
+        date: trx.transaction_date || (trx.created_at || '').slice(0, 10),
+        monthOrDesc: trx.description || trx.month || 'Subscription Deposit',
+        monthKey: parsedMonth.key,
+        amount: Number(trx.amount || 0),
+        paymentMethod: (trx as any).payment_method || (trx.receipt as any)?.payment_method || (trx.type === 'deposit' ? 'cash' : 'cash'),
+        receiptPhoto: trx.receipt_photo,
+        receiptPhotoUploadedAt: trx.receipt_photo_uploaded_at,
+        memberPaidAmount: trx.member_paid_amount ? Number(trx.member_paid_amount) : undefined,
+        memberTrxReference: trx.member_trx_reference,
+        inputtedReference: parsedRef,
+        isRejected,
+        isPartial,
+        rejectionReason: trx.rejection_reason,
+        status: isPaid ? 'paid' : (isPartial ? 'partial' : (isRejected ? 'rejected' : 'pending')),
+        rawTransaction: trx,
+      };
+
+      map[mId].items.push(item);
+    });
+
+    // Populate monthGroups and aggregates per member
+    Object.values(map).forEach((m) => {
+      const monthMap: Record<string, MonthGroup> = {};
+
+      m.items.forEach((item) => {
+        const pMonth = parseMonthGrouping(item.monthOrDesc, item.date);
+        const mKey = pMonth.key;
+
+        if (!monthMap[mKey]) {
+          monthMap[mKey] = {
+            monthKey: mKey,
+            monthLabel: pMonth.label,
+            campaignTrxNo: item.transactionNo?.startsWith('TRX-') ? item.transactionNo : undefined,
+            items: [],
+            totalCount: 0,
+            totalPaid: 0,
+            totalDue: 0,
+            netAmount: 0,
+            fullyPaidCount: 0,
+            partiallyPaidCount: 0,
+            receivedSlipCount: 0,
+            pureDuePendingCount: 0,
+            rejectedCount: 0,
+          };
+        }
+
+        monthMap[mKey].items.push(item);
+        monthMap[mKey].totalCount += 1;
+
+        if (item.status === 'paid') {
+          monthMap[mKey].totalPaid += item.amount;
+          monthMap[mKey].fullyPaidCount += 1;
+        } else if (item.status === 'partial') {
+          monthMap[mKey].totalPaid += (item.memberPaidAmount || item.amount);
+          monthMap[mKey].partiallyPaidCount += 1;
+        } else if (item.status === 'rejected') {
+          monthMap[mKey].rejectedCount += 1;
+        } else {
+          monthMap[mKey].totalDue += item.amount;
+          if (item.receiptPhoto) {
+            monthMap[mKey].receivedSlipCount += 1;
+          } else {
+            monthMap[mKey].pureDuePendingCount += 1;
+          }
+        }
+        monthMap[mKey].netAmount = monthMap[mKey].totalPaid + monthMap[mKey].totalDue;
+      });
+
+      m.monthGroups = Object.values(monthMap).sort((a, b) => b.monthKey.localeCompare(a.monthKey));
+      m.totalCount = m.items.length;
+      m.totalPaid = m.monthGroups.reduce((s, g) => s + g.totalPaid, 0);
+      m.totalDue = m.monthGroups.reduce((s, g) => s + g.totalDue, 0);
+      m.netAmount = m.totalPaid + m.totalDue;
+      m.fullyPaidCount = m.monthGroups.reduce((s, g) => s + g.fullyPaidCount, 0);
+      m.partiallyPaidCount = m.monthGroups.reduce((s, g) => s + g.partiallyPaidCount, 0);
+      m.receivedSlipCount = m.monthGroups.reduce((s, g) => s + g.receivedSlipCount, 0);
+      m.pureDuePendingCount = m.monthGroups.reduce((s, g) => s + g.pureDuePendingCount, 0);
+      m.rejectedCount = m.monthGroups.reduce((s, g) => s + g.rejectedCount, 0);
+
+      if (m.totalDue === 0 && m.totalPaid > 0) {
+        m.currentState = 'cleared';
+      } else if (m.partiallyPaidCount > 0) {
+        m.currentState = 'partial';
+      } else if (m.receivedSlipCount > 0) {
+        m.currentState = 'received';
+      } else if (m.rejectedCount > 0 && m.totalPaid === 0) {
+        m.currentState = 'rejected';
+      } else {
+        m.currentState = 'due';
+      }
+    });
+
+    return map;
+  }, [rawTransactions, membersList]);
+
+  // All Chronological Items
+  const allChronologicalItems = useMemo(() => {
+    const list: (MemberReceiptItem & { memberName: string; memberNo: string })[] = [];
+
+    Object.values(memberReceiptGroups).forEach((m) => {
+      m.items.forEach((item) => {
+        list.push({
+          ...item,
+          memberName: m.memberName,
+          memberNo: m.memberNo,
+        });
+      });
+    });
+
+    return list.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  }, [memberReceiptGroups]);
+
+  // Created Demand Groups (Campaign Batches)
   const createdDemandGroups = useMemo(() => {
     const groups: Record<string, {
+      id?: number | string;
+      transaction_no?: string;
       key: string;
       title: string;
       category: string;
@@ -506,7 +462,7 @@ export default function AdminTransactionsPage() {
       transactions: Transaction[];
     }> = {};
 
-    allTransactions.forEach((t) => {
+    rawTransactions.forEach((t) => {
       let groupKey = '';
       if (t.payment_category === 'monthly_payment' && t.month) {
         groupKey = `monthly_${t.month}`;
@@ -529,6 +485,8 @@ export default function AdminTransactionsPage() {
         }
 
         groups[groupKey] = {
+          id: t.id,
+          transaction_no: t.transaction_no,
           key: groupKey,
           title,
           category: t.payment_category || t.type,
@@ -537,7 +495,7 @@ export default function AdminTransactionsPage() {
           dueDate: t.transaction_date,
           created_at: t.created_at,
           updated_at: t.updated_at,
-          last_modified_by: t.last_modified_by || t.updated_by || t.created_by,
+          last_modified_by: t.last_modified_by || (t as any).updated_by || (t as any).created_by,
           transactions: [],
         };
       }
@@ -563,9 +521,7 @@ export default function AdminTransactionsPage() {
         .filter((t) => t.status === 'paid')
         .reduce((sum, t) => sum + Number(t.amount || 0), 0);
 
-      // Group active transactions by member ID to evaluate each member's status
       const memberStatusMap: Record<string | number, { hasPaid: boolean; hasPending: boolean }> = {};
-      
       targetTrxList.forEach((t) => {
         const mId = t.member?.id || (t as any).member_id;
         if (!mId) return;
@@ -592,8 +548,6 @@ export default function AdminTransactionsPage() {
 
       const pendingMembersCount = partiallyPaidMembersCount + unpaidMembersCount;
 
-      // Progress percentage based on fully cleared members count vs total members
-      // (Partial payments do not increment fully cleared member count, but show partial tag and collected amount)
       const memberProgressPercent = totalMembersAssigned > 0
         ? Math.min(100, Math.round((fullyPaidMembersCount / totalMembersAssigned) * 100))
         : 0;
@@ -603,12 +557,29 @@ export default function AdminTransactionsPage() {
         : (totalCollectedAmount > 0 ? 100 : 0);
       const isFullyPaid = pendingMembersCount === 0 && totalMembersAssigned > 0;
 
+      let duePendingCount = 0;
+      let receivedSlipCount = 0;
+      let rejectedCount = 0;
+
+      Object.entries(memberStatusMap).forEach(([mId, st]) => {
+        if (st.hasPaid && !st.hasPending) return;
+        const mTrxList = g.transactions.filter((t) => String(t.member?.id) === String(mId) || String((t as any).member_id) === String(mId));
+        const hasSlip = mTrxList.some((t) => t.status === 'pending' && Boolean(t.receipt_photo));
+        const isRej = mTrxList.some((t) => t.status === 'rejected');
+        if (hasSlip) receivedSlipCount += 1;
+        else if (isRej) rejectedCount += 1;
+        else duePendingCount += 1;
+      });
+
       return {
         ...g,
         totalMembersAssigned,
         paidCount: fullyPaidMembersCount,
         partiallyPaidCount: partiallyPaidMembersCount,
         pendingCount: pendingMembersCount,
+        duePendingCount,
+        receivedSlipCount,
+        rejectedCount,
         totalDemandAmount,
         totalCollectedAmount,
         progressPercent,
@@ -622,15 +593,68 @@ export default function AdminTransactionsPage() {
       const dateB = b.updated_at || b.created_at || b.dueDate || '';
       return dateB.localeCompare(dateA);
     });
-  }, [allTransactions]);
+  }, [rawTransactions]);
 
+  // Overall Aggregate Stats
+  const stats = useMemo(() => {
+    let currentClearedCount = 0;
+    let currentPartialCount = 0;
+    let currentReceivedCount = 0;
+    let currentDueCount = 0;
+    let currentRejectedCount = 0;
+
+    let totalClearedAmount = 0;
+    let partialCollectedAmount = 0;
+    let receivedSlipsAmount = 0;
+    let duePendingAmount = 0;
+    let rejectedSlipsAmount = 0;
+
+    allChronologicalItems.forEach((it) => {
+      if (it.status === 'paid') {
+        currentClearedCount += 1;
+        totalClearedAmount += it.amount;
+      } else if (it.status === 'partial') {
+        currentPartialCount += 1;
+        partialCollectedAmount += (it.memberPaidAmount || it.amount);
+      } else if (it.status === 'rejected') {
+        currentRejectedCount += 1;
+        rejectedSlipsAmount += it.amount;
+      } else {
+        currentDueCount += 1;
+        duePendingAmount += it.amount;
+        if (it.receiptPhoto) {
+          currentReceivedCount += 1;
+          receivedSlipsAmount += it.amount;
+        }
+      }
+    });
+
+    const pureUnpaidDueCount = currentDueCount - currentReceivedCount;
+
+    return {
+      totalMembers: Object.keys(memberReceiptGroups).length,
+      currentClearedCount,
+      currentPartialCount,
+      currentReceivedCount,
+      currentDueCount,
+      pureUnpaidDueCount,
+      currentRejectedCount,
+      totalClearedAmount,
+      partialCollectedAmount,
+      receivedSlipsAmount,
+      duePendingAmount,
+      rejectedSlipsAmount,
+    };
+  }, [allChronologicalItems, memberReceiptGroups]);
+
+  // Filtering Lists
   const filteredCreatedGroups = useMemo(() => {
     return createdDemandGroups.filter((g) => {
-      if (createdStatusFilter === 'pending' && g.isFullyPaid) return false;
-      if (createdStatusFilter === 'complete' && !g.isFullyPaid) return false;
+      if (statusFilter === 'paid' && !g.isFullyPaid) return false;
+      if (statusFilter === 'pending' && g.isFullyPaid) return false;
 
-      if (createdSearch.trim()) {
-        const q = createdSearch.toLowerCase();
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
         const modifier = getModifierInfo(g);
         const titleMatch = g.title.toLowerCase().includes(q);
         const monthMatch = g.month?.toLowerCase().includes(q);
@@ -641,2167 +665,960 @@ export default function AdminTransactionsPage() {
 
       return true;
     });
-  }, [createdDemandGroups, createdStatusFilter, createdSearch]);
+  }, [createdDemandGroups, statusFilter, searchQuery]);
 
-  const memberMatrix = useMemo(() => {
-    const trxByMember: Record<number, Transaction[]> = {};
-    const paidDueKeySet = new Set<string>();
-    const paidMemberMonthSet = new Set<string>();
-    const memberMonthSlipMap = new Map<string, { photo: string; uploadedAt?: string; amount?: number; ref?: string; method?: string; comment?: string }>();
+  const filteredMemberGroups = useMemo(() => {
+    return Object.values(memberReceiptGroups).filter((m) => {
+      if (statusFilter === 'paid' && m.currentState !== 'cleared') return false;
+      if (statusFilter === 'partial' && m.partiallyPaidCount === 0) return false;
+      if (statusFilter === 'received_slip' && m.receivedSlipCount === 0) return false;
+      if (statusFilter === 'pending' && m.totalDue === 0) return false;
+      if (statusFilter === 'rejected' && m.rejectedCount === 0) return false;
 
-    allTransactions.forEach((t) => {
-      const mId = t.member?.id;
-      if (mId) {
-        if (!trxByMember[mId]) trxByMember[mId] = [];
-        trxByMember[mId].push(t);
-      }
-
-      const memId = t.member?.id || (t as any).member_id;
-      if (memId && t.receipt_photo) {
-        if (t.month) {
-          memberMonthSlipMap.set(`${memId}___${t.month.trim().toLowerCase()}`, {
-            photo: t.receipt_photo,
-            uploadedAt: t.receipt_photo_uploaded_at,
-            amount: t.member_paid_amount ? Number(t.member_paid_amount) : undefined,
-            ref: t.member_trx_reference,
-            method: t.member_payment_method,
-            comment: t.member_comment,
-          });
-        }
-        if (t.description) {
-          memberMonthSlipMap.set(`${memId}___${t.description.trim().toLowerCase()}`, {
-            photo: t.receipt_photo,
-            uploadedAt: t.receipt_photo_uploaded_at,
-            amount: t.member_paid_amount ? Number(t.member_paid_amount) : undefined,
-            ref: t.member_trx_reference,
-            method: t.member_payment_method,
-            comment: t.member_comment,
-          });
-        }
-      }
-
-      if (t.status === 'paid') {
-        if (memId) {
-          if (t.month) paidMemberMonthSet.add(`${memId}___${t.month.trim().toLowerCase()}`);
-          if (t.description) paidMemberMonthSet.add(`${memId}___${t.description.trim().toLowerCase()}`);
-          const dueKey = `${memId}_${t.payment_category || t.type || ''}_${t.month || ''}_${t.description || ''}`;
-          paidDueKeySet.add(dueKey);
-        }
-      }
-    });
-
-    const rawReceipts = receiptsData?.data || [];
-    const receiptsByMember: Record<number, Receipt[]> = {};
-    rawReceipts.forEach((r) => {
-      const mId = r.member?.id || (r as any).member_id;
-      if (mId) {
-        if (!receiptsByMember[mId]) receiptsByMember[mId] = [];
-        receiptsByMember[mId].push(r);
-      }
-    });
-
-    return membersList.map((m) => {
-      const memberTrx = trxByMember[m.id] || [];
-      const memberReceipts = receiptsByMember[m.id] || [];
-      const pendingTrxRaw = memberTrx.filter((t) => t.status === 'pending');
-      const paidTrxRaw = memberTrx.filter((t) => t.status === 'paid');
-
-      // Hydrate slip from sister transaction if partial payment split created an empty pending row
-      const pendingTrx = pendingTrxRaw.map((pt) => {
-        if (pt.receipt_photo) return pt;
-        const sisterSlip = (pt.month ? memberMonthSlipMap.get(`${m.id}___${pt.month.trim().toLowerCase()}`) : null) ||
-          (pt.description ? memberMonthSlipMap.get(`${m.id}___${pt.description.trim().toLowerCase()}`) : null);
-
-        if (sisterSlip) {
-          return {
-            ...pt,
-            receipt_photo: sisterSlip.photo,
-            receipt_photo_uploaded_at: sisterSlip.uploadedAt || pt.receipt_photo_uploaded_at,
-            member_paid_amount: sisterSlip.amount !== undefined ? sisterSlip.amount : pt.member_paid_amount,
-            member_trx_reference: sisterSlip.ref || pt.member_trx_reference,
-            member_payment_method: sisterSlip.method || pt.member_payment_method,
-            member_comment: sisterSlip.comment || pt.member_comment,
-          };
-        }
-        return pt;
-      });
-
-      const paidTrx = paidTrxRaw.map((pt) => {
-        const linkedReceipt = memberReceipts.find(
-          (r) => r.transaction?.id === pt.id || (r as any).transaction_id === pt.id || (pt.receipt && r.id === pt.receipt.id)
-        ) || pt.receipt;
-
-        const sisterSlip = !pt.receipt_photo
-          ? (pt.month ? memberMonthSlipMap.get(`${m.id}___${pt.month.trim().toLowerCase()}`) : null) ||
-            (pt.description ? memberMonthSlipMap.get(`${m.id}___${pt.description.trim().toLowerCase()}`) : null)
-          : null;
-
-        return {
-          ...pt,
-          receipt: linkedReceipt,
-          receipt_photo: pt.receipt_photo || sisterSlip?.photo,
-          receipt_photo_uploaded_at: pt.receipt_photo_uploaded_at || sisterSlip?.uploadedAt,
-          member_paid_amount: pt.member_paid_amount !== undefined ? pt.member_paid_amount : sisterSlip?.amount,
-          member_trx_reference: pt.member_trx_reference || sisterSlip?.ref,
-          member_payment_method: pt.member_payment_method || sisterSlip?.method || linkedReceipt?.payment_method,
-          member_comment: pt.member_comment || sisterSlip?.comment,
-        };
-      });
-
-      // Keep rejected transactions for dues that are NOT paid yet
-      const rejectedTrx = memberTrx.filter((t) => {
-        if (t.status !== 'rejected' && !t.rejection_reason) return false;
-        const dueKey = `${m.id}_${t.payment_category || t.type || ''}_${t.month || ''}_${t.description || ''}`;
-        const isPaid =
-          paidDueKeySet.has(dueKey) ||
-          (t.month && paidMemberMonthSet.has(`${m.id}___${t.month.trim().toLowerCase()}`)) ||
-          (t.description && paidMemberMonthSet.has(`${m.id}___${t.description.trim().toLowerCase()}`));
-        return !isPaid;
-      });
-
-      const totalPendingAmount = pendingTrx.reduce((sum, t) => sum + Number(t.amount || 0), 0);
-      const totalPaidAmount = paidTrx.reduce((sum, t) => sum + Number(t.amount || 0), 0);
-      const totalDuesAssigned = totalPaidAmount + totalPendingAmount;
-      const completionPercent = totalDuesAssigned > 0
-        ? Math.round((totalPaidAmount / totalDuesAssigned) * 100)
-        : 100;
-
-      return {
-        member: m,
-        transactions: memberTrx,
-        receipts: memberReceipts,
-        pendingTransactions: pendingTrx,
-        paidTransactions: paidTrx,
-        rejectedTransactions: rejectedTrx,
-        totalPendingAmount,
-        totalPaidAmount,
-        totalDuesAssigned,
-        completionPercent,
-        hasPending: pendingTrx.length > 0,
-        hasRejected: rejectedTrx.length > 0,
-      };
-    });
-  }, [membersList, allTransactions, receiptsData]);
-
-  const stats = useMemo(() => {
-    const totalCollected = memberMatrix.reduce((s, m) => s + m.totalPaidAmount, 0);
-    const totalPending = memberMatrix.reduce((s, m) => s + m.totalPendingAmount, 0);
-    const countWithPending = memberMatrix.filter((m) => m.hasPending).length;
-    const countCleared = memberMatrix.filter((m) => !m.hasPending).length;
-    const countWithRejected = memberMatrix.filter((m) => m.hasRejected).length;
-    const totalRejectedCount = memberMatrix.reduce((sum, m) => sum + m.rejectedTransactions.length, 0);
-    const totalMembers = memberMatrix.length;
-
-    return {
-      totalCollected,
-      totalPending,
-      countWithPending,
-      countCleared,
-      countWithRejected,
-      totalRejectedCount,
-      totalMembers,
-    };
-  }, [memberMatrix]);
-
-  const filteredMembers = useMemo(() => {
-    return memberMatrix.filter((m) => {
-      if (memberStatusFilter === 'pending' && !m.hasPending) return false;
-      if (memberStatusFilter === 'cleared' && m.hasPending) return false;
-      if (memberStatusFilter === 'rejected' && !m.hasRejected) return false;
-
-      if (memberSearch.trim()) {
-        const q = memberSearch.toLowerCase();
-        const nameMatch = m.member.name.toLowerCase().includes(q);
-        const idMatch = m.member.member_profile?.member_no?.toLowerCase().includes(q);
-        const emailMatch = m.member.email.toLowerCase().includes(q);
-        const phoneMatch = m.member.member_profile?.phone?.toLowerCase().includes(q);
-        return nameMatch || idMatch || emailMatch || phoneMatch;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const nameMatch = m.memberName.toLowerCase().includes(q);
+        const noMatch = m.memberNo.toLowerCase().includes(q);
+        const emailMatch = (m.memberEmail || '').toLowerCase().includes(q);
+        const phoneMatch = (m.memberPhone || '').toLowerCase().includes(q);
+        const itemMatch = m.items.some((it) =>
+          it.monthOrDesc.toLowerCase().includes(q) ||
+          it.transactionNo.toLowerCase().includes(q) ||
+          (it.inputtedReference || '').toLowerCase().includes(q)
+        );
+        return nameMatch || noMatch || emailMatch || phoneMatch || itemMatch;
       }
 
       return true;
     });
-  }, [memberMatrix, memberStatusFilter, memberSearch]);
+  }, [memberReceiptGroups, statusFilter, searchQuery]);
 
-  const origDue = collectingTrx ? Number(collectingTrx.amount) : 0;
-  const numInputPaid = Number(paidAmountInput) || 0;
-  const computedRemainingDue = Math.max(0, Math.round((origDue - numInputPaid) * 100) / 100);
-  const isFullSettlement = computedRemainingDue === 0 && numInputPaid >= origDue;
+  const filteredAllItems = useMemo(() => {
+    return allChronologicalItems.filter((it) => {
+      if (statusFilter === 'paid' && it.status !== 'paid') return false;
+      if (statusFilter === 'partial' && it.status !== 'partial') return false;
+      if (statusFilter === 'received_slip' && (!it.receiptPhoto || it.status === 'paid' || it.status === 'rejected')) return false;
+      if (statusFilter === 'pending' && (it.status === 'paid' || it.status === 'rejected')) return false;
+      if (statusFilter === 'rejected' && it.status !== 'rejected') return false;
+
+      if (paymentMethodFilter !== 'all') {
+        const m = (it.paymentMethod || 'cash').toLowerCase();
+        if (paymentMethodFilter === 'cash' && !m.includes('cash')) return false;
+        if (paymentMethodFilter === 'bank' && !m.includes('bank') && !m.includes('ibbl') && !m.includes('brac')) return false;
+        if (paymentMethodFilter === 'mobile_banking' && !m.includes('bkash') && !m.includes('nagad') && !m.includes('rocket') && !m.includes('mobile')) return false;
+      }
+
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const nameMatch = it.memberName.toLowerCase().includes(q);
+        const noMatch = it.memberNo.toLowerCase().includes(q);
+        const descMatch = it.monthOrDesc.toLowerCase().includes(q);
+        const trxMatch = it.transactionNo.toLowerCase().includes(q);
+        const refMatch = (it.inputtedReference || '').toLowerCase().includes(q);
+        return nameMatch || noMatch || descMatch || trxMatch || refMatch;
+      }
+
+      return true;
+    });
+  }, [allChronologicalItems, statusFilter, paymentMethodFilter, searchQuery]);
+
+  const toggleExpandGroup = (groupKey: string) => {
+    setExpandedGroups((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }));
+  };
+
+  const toggleExpandMember = (memberId: string | number) => {
+    setExpandedMembers((prev) => ({ ...prev, [memberId]: !prev[memberId] }));
+  };
+
+  const toggleExpandMonth = (monthKey: string) => {
+    setExpandedMonths((prev) => ({ ...prev, [monthKey]: !prev[monthKey] }));
+  };
+
+  // Open Lightbox Photo Modal
+  const openPhotoPreviewModal = (url: string, title: string, date: string, isRejected: boolean = false, rejectionReason: string | null = null) => {
+    setPhotoModalUrl(url);
+    setPhotoModalTitle(title);
+    setPhotoModalDate(date);
+    setPhotoModalIsRejected(isRejected);
+    setPhotoModalRejectionReason(rejectionReason);
+    setOpenPhotoModal(true);
+  };
+
+  // =========================================================================
+  // PRINT FINANCIAL STATEMENT HANDLERS (REPORT GENERATION)
+  // =========================================================================
+
+  const handlePrintEntireReport = () => {
+    const sections: PrintSection[] = Object.values(memberReceiptGroups)
+      .filter((m) => m.items.length > 0)
+      .map((m) => {
+        const monthSections: PrintMonthSection[] = m.monthGroups.map((mg) => ({
+          monthTitle: mg.monthLabel,
+          campaignTrxNo: mg.campaignTrxNo,
+          subTotalPaid: mg.totalPaid,
+          subTotalDue: mg.totalDue,
+          subTotalAssessed: mg.netAmount,
+          rows: mg.items.map((it, rIdx) => ({
+            serial: rIdx + 1,
+            date: it.date || '-',
+            description: it.monthOrDesc,
+            transactionNo: it.transactionNo || it.receiptNo || '-',
+            refNo: it.inputtedReference || '-',
+            status: it.status === 'paid' ? 'paid' : (it.status === 'partial' ? 'partial' : (it.status === 'rejected' ? 'rejected' : 'due')),
+            paidAmount: it.status === 'paid' ? it.amount : (it.memberPaidAmount || 0),
+            dueAmount: it.status !== 'paid' && it.status !== 'rejected' ? it.amount : 0,
+            assessedAmount: it.amount,
+          })),
+        }));
+
+        return {
+          memberId: m.memberId,
+          memberName: m.memberName,
+          memberNo: m.memberNo,
+          memberRole: m.memberRole,
+          memberHeader: m.memberName,
+          memberSubHeader: `FOLIO #${m.memberNo} • ${m.memberRole || 'Member'} • Phone: ${m.memberPhone || '-'}`,
+          monthSections,
+          memberTotalPaid: m.totalPaid,
+          memberTotalDue: m.totalDue,
+          memberTotalAssessed: m.netAmount,
+        };
+      });
+
+    const reportData: PrintingReportData = {
+      level: 1,
+      title: 'All Members Official Financial Audit & Transaction Ledger Statement',
+      subtitle: `Society Complete Ledger (${sections.length} Accounts)`,
+      date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+      summaryStats: {
+        totalDemand: stats.totalClearedAmount + stats.duePendingAmount + stats.partialCollectedAmount,
+        totalPaid: stats.totalClearedAmount + stats.partialCollectedAmount,
+        totalDue: stats.duePendingAmount,
+        recoveryRate: (stats.totalClearedAmount + stats.partialCollectedAmount) / Math.max(1, stats.totalClearedAmount + stats.duePendingAmount + stats.partialCollectedAmount) * 100,
+        totalMembers: stats.totalMembers,
+        totalRecords: allChronologicalItems.length,
+        paidCount: stats.currentClearedCount + stats.currentPartialCount,
+        dueCount: stats.currentDueCount,
+      },
+      sections,
+      grandTotalPaid: stats.totalClearedAmount + stats.partialCollectedAmount,
+      grandTotalDue: stats.duePendingAmount,
+      totalRecords: allChronologicalItems.length,
+    };
+
+    setPrintingReport(reportData);
+    setTimeout(() => {
+      window.print();
+    }, 150);
+  };
+
+  const handlePrintMemberReport = (memberGroup: MemberGroup) => {
+    const monthSections: PrintMonthSection[] = memberGroup.monthGroups.map((mg) => ({
+      monthTitle: mg.monthLabel,
+      campaignTrxNo: mg.campaignTrxNo,
+      subTotalPaid: mg.totalPaid,
+      subTotalDue: mg.totalDue,
+      subTotalAssessed: mg.netAmount,
+      rows: mg.items.map((it, rIdx) => ({
+        serial: rIdx + 1,
+        date: it.date || '-',
+        description: it.monthOrDesc,
+        transactionNo: it.transactionNo || it.receiptNo || '-',
+        refNo: it.inputtedReference || '-',
+        status: it.status === 'paid' ? 'paid' : (it.status === 'partial' ? 'partial' : (it.status === 'rejected' ? 'rejected' : 'due')),
+        paidAmount: it.status === 'paid' ? it.amount : (it.memberPaidAmount || 0),
+        dueAmount: it.status !== 'paid' && it.status !== 'rejected' ? it.amount : 0,
+        assessedAmount: it.amount,
+      })),
+    }));
+
+    const section: PrintSection = {
+      memberId: memberGroup.memberId,
+      memberName: memberGroup.memberName,
+      memberNo: memberGroup.memberNo,
+      memberRole: memberGroup.memberRole,
+      memberHeader: memberGroup.memberName,
+      memberSubHeader: `FOLIO #${memberGroup.memberNo} • ${memberGroup.memberRole || 'Member'} • Phone: ${memberGroup.memberPhone || '-'}`,
+      monthSections,
+      memberTotalPaid: memberGroup.totalPaid,
+      memberTotalDue: memberGroup.totalDue,
+      memberTotalAssessed: memberGroup.netAmount,
+    };
+
+    const reportData: PrintingReportData = {
+      level: 2,
+      title: `Official Member Statement — ${memberGroup.memberName}`,
+      subtitle: `Folio #${memberGroup.memberNo} • Individual Account Statement`,
+      date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+      sections: [section],
+      grandTotalPaid: memberGroup.totalPaid,
+      grandTotalDue: memberGroup.totalDue,
+      totalRecords: memberGroup.items.length,
+    };
+
+    setPrintingReport(reportData);
+    setTimeout(() => {
+      window.print();
+    }, 150);
+  };
 
   return (
-    <div className={printReceipt ? 'space-y-5 print:hidden' : 'space-y-5'}>
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Billing Demands & Transactions</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            {activeTab === 'created'
-              ? 'Create monthly subscriptions & one-time dues, track campaign collection progress lines, and view member receipt slips.'
-              : 'Monitor member payment statuses, view uploaded receipt photos, and collect pending dues with live settlement.'}
-          </p>
-        </div>
-        {staff && activeTab === 'created' && (
+    <>
+      <div className={printReceipt || printingReport ? 'space-y-5 print:hidden' : 'space-y-5'}>
+        {/* Top Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Transactions &amp; Financial Ledger</h1>
+            <p className="text-sm text-slate-500 mt-0.5">
+              Audited transaction ledger of all society demand batches, member assessment matrices, collection progress, and printable financial statements.
+            </p>
+          </div>
+
           <div className="flex items-center gap-2.5 flex-wrap">
+            <Link href="/admin/reports/preview">
+              <Button variant="outline" size="sm" className="gap-2 border-emerald-300 text-emerald-800 hover:bg-emerald-50 cursor-pointer font-semibold">
+                <Eye className="h-4 w-4" /> Statement Preview
+              </Button>
+            </Link>
+
             <Button
-              onClick={() => {
-                const settingsList = Array.isArray(settings) ? settings : (settings as any)?.data || [];
-                const defaultFee = settingsList.find((s: any) => s.setting_key === 'payment_amount_1')?.setting_value || '2000';
-                setDemandAmount(defaultFee);
-                setTargetAllMembers(true);
-                setSelectedMemberId('');
-                setOpenDemand(true);
-              }}
-              className="flex items-center gap-2 cursor-pointer bg-emerald-700 hover:bg-emerald-800 shadow-sm"
+              onClick={handlePrintEntireReport}
+              className="flex items-center gap-2 cursor-pointer bg-emerald-700 hover:bg-emerald-800 text-white font-bold shadow-xs"
             >
-              <CalendarCheck className="h-4 w-4" /> Create / Assign Payment
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => setOpenSingle(true)}
-              className="flex items-center gap-1.5 cursor-pointer border-slate-200"
-            >
-              <PlusCircle className="h-4 w-4 text-slate-600" /> Manual Record
+              <Printer className="h-4 w-4" /> Print Official Report
             </Button>
           </div>
-        )}
-      </div>
+        </div>
 
-      {/* 2 TOP-LEVEL TOGGLE PAGES / TABS */}
-      <div className="flex items-center gap-2 border-b border-slate-200 pb-1">
-        <button
-          onClick={() => setActiveTab('created')}
-          className={`px-4 py-2.5 text-xs sm:text-sm font-bold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
-            activeTab === 'created'
-              ? 'bg-emerald-800 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-          }`}
-        >
-          <Layers className="h-4 w-4" />
-          <span>Transactions & Created Records</span>
-          <span className={`text-[11px] px-2 py-0.2 rounded-full font-bold ${
-            activeTab === 'created' ? 'bg-emerald-950/80 text-emerald-200' : 'bg-slate-200 text-slate-700'
-          }`}>
-            {createdDemandGroups.length} Campaigns
-          </span>
-        </button>
+        {/* Summary Stat Cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3.5">
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-500 uppercase">Cleared Receipts</span>
+              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+            </div>
+            <p className="text-xl font-extrabold text-emerald-800 mt-1.5">
+              {stats.currentClearedCount}
+            </p>
+            <p className="text-[11px] font-mono text-emerald-700 mt-0.5">
+              BDT {stats.totalClearedAmount.toLocaleString()} cleared
+            </p>
+          </div>
 
-        <button
-          onClick={() => setActiveTab('members_status')}
-          className={`px-4 py-2.5 text-xs sm:text-sm font-bold rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
-            activeTab === 'members_status'
-              ? 'bg-emerald-800 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-          }`}
-        >
-          <Users className="h-4 w-4" />
-          <span>Members Status (Pending & Complete)</span>
-          {stats.countWithPending > 0 ? (
-            <span className="bg-amber-500 text-white text-[11px] px-2 py-0.2 rounded-full font-bold animate-pulse">
-              {stats.countWithPending} Pending
-            </span>
-          ) : (
-            <span className="bg-emerald-600 text-white text-[11px] px-2 py-0.2 rounded-full font-bold">
-              All Clear
-            </span>
-          )}
-        </button>
-      </div>
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-purple-700 uppercase">Partially Paid</span>
+              <Wallet className="h-4 w-4 text-purple-600" />
+            </div>
+            <p className="text-xl font-extrabold text-purple-800 mt-1.5">
+              {stats.currentPartialCount}
+            </p>
+            <p className="text-[11px] font-mono text-purple-700 mt-0.5">
+              BDT {stats.partialCollectedAmount.toLocaleString()} collected
+            </p>
+          </div>
 
-      {/* VIEW 1: TRANSACTIONS & CREATED RECORDS */}
-      {activeTab === 'created' && (
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-blue-700 uppercase">Received Slips</span>
+              <FileCheck className="h-4 w-4 text-blue-600" />
+            </div>
+            <p className="text-xl font-extrabold text-blue-800 mt-1.5">
+              {stats.currentReceivedCount}
+            </p>
+            <p className="text-[11px] font-mono text-blue-700 mt-0.5">
+              BDT {stats.receivedSlipsAmount.toLocaleString()} in review
+            </p>
+          </div>
+
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-amber-700 uppercase">Due Pending</span>
+              <Clock className="h-4 w-4 text-amber-600" />
+            </div>
+            <p className="text-xl font-extrabold text-amber-800 mt-1.5">
+              {stats.currentDueCount}
+            </p>
+            <p className="text-[11px] font-mono text-amber-700 mt-0.5">
+              BDT {stats.duePendingAmount.toLocaleString()} pending
+            </p>
+          </div>
+
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs col-span-2 lg:col-span-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-red-700 uppercase">Rejected Slips</span>
+              <XCircle className="h-4 w-4 text-red-600" />
+            </div>
+            <p className="text-xl font-extrabold text-red-800 mt-1.5">
+              {stats.currentRejectedCount}
+            </p>
+            <p className="text-[11px] font-mono text-red-700 mt-0.5">
+              BDT {stats.rejectedSlipsAmount.toLocaleString()} declined
+            </p>
+          </div>
+        </div>
+
+        {/* Main Ledger Control & View Switcher */}
         <div className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="p-3.5 bg-white border border-slate-200 rounded-xl shadow-2xs">
-              <span className="text-[11px] uppercase tracking-wider font-bold text-slate-500 block">Total Created Fee Campaigns</span>
-              <div className="text-xl font-bold text-slate-900 mt-0.5">
-                {createdDemandGroups.length} Billing Demands
-              </div>
-            </div>
-
-            <div className="p-3.5 bg-emerald-50/60 border border-emerald-200 rounded-xl shadow-2xs">
-              <span className="text-[11px] uppercase tracking-wider font-bold text-emerald-800 block">Total Collected to Date</span>
-              <div className="text-xl font-bold text-emerald-900 mt-0.5">
-                BDT {stats.totalCollected.toLocaleString()}
-              </div>
-            </div>
-
-            <div className="p-3.5 bg-amber-50/60 border border-amber-200 rounded-xl shadow-2xs">
-              <span className="text-[11px] uppercase tracking-wider font-bold text-amber-800 block">Total Outstanding Pending</span>
-              <div className="text-xl font-bold text-amber-900 mt-0.5">
-                BDT {stats.totalPending.toLocaleString()}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <button
-                onClick={() => setCreatedStatusFilter('all')}
-                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer ${
-                  createdStatusFilter === 'all'
-                    ? 'bg-slate-900 text-white'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                }`}
-              >
-                All Created Demands ({createdDemandGroups.length})
-              </button>
-
-              <button
-                onClick={() => setCreatedStatusFilter('pending')}
-                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
-                  createdStatusFilter === 'pending'
-                    ? 'bg-amber-600 text-white shadow-2xs'
-                    : 'bg-amber-100/80 text-amber-900 hover:bg-amber-200'
-                }`}
-              >
-                <Clock className="h-3 w-3" />
-                Pending Collection ({createdDemandGroups.filter((g) => !g.isFullyPaid).length})
-              </button>
-
-              <button
-                onClick={() => setCreatedStatusFilter('complete')}
-                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
-                  createdStatusFilter === 'complete'
-                    ? 'bg-emerald-700 text-white shadow-2xs'
-                    : 'bg-emerald-100/80 text-emerald-900 hover:bg-emerald-200'
-                }`}
-              >
-                <CheckCircle2 className="h-3 w-3" />
-                Fully Completed ({createdDemandGroups.filter((g) => g.isFullyPaid).length})
-              </button>
-            </div>
-
-            <div className="relative w-full sm:w-72">
-              <Search className="h-4 w-4 absolute left-3 top-2.5 text-slate-400" />
-              <Input
-                placeholder="Search by demand title, admin, month..."
-                value={createdSearch}
-                onChange={(e) => setCreatedSearch(e.target.value)}
-                className="pl-9 bg-slate-50 text-xs h-9"
-              />
-            </div>
-          </div>
-
-          <Card className="border-slate-200 shadow-xs overflow-hidden">
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader className="bg-slate-50/80">
-                  <TableRow>
-                    <TableHead className="font-bold text-slate-900">Billing Demand / Record</TableHead>
-                    <TableHead className="font-bold text-slate-900">Created / Updated By</TableHead>
-                    <TableHead className="font-bold text-slate-900 min-w-[240px]">Total Members & Progress Line</TableHead>
-                    <TableHead className="font-bold text-slate-900">Status</TableHead>
-                    <TableHead className="font-bold text-slate-900">Updated Date</TableHead>
-                    <TableHead className="text-right font-bold text-slate-900">Assigned Members</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {loadingAllTrx && (
-                    <TableRow><TableCell colSpan={6} className="text-center py-8 text-slate-500">Loading created fee records...</TableCell></TableRow>
-                  )}
-                  {filteredCreatedGroups.length === 0 && !loadingAllTrx && (
-                    <TableRow><TableCell colSpan={6} className="text-center py-8 text-slate-500">No created billing records found.</TableCell></TableRow>
-                  )}
-                  {filteredCreatedGroups.map((group) => {
-                    const modifier = getModifierInfo(group);
-                    const isExpanded = !!expandedGroups[group.key];
-                    const displayDate = group.updated_at || group.created_at || group.dueDate;
-
-                    return (
-                      <React.Fragment key={group.key}>
-                        <TableRow className="hover:bg-slate-50/70 transition-colors">
-                          <TableCell>
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-bold text-slate-900 text-xs sm:text-sm">{group.title}</span>
-                                <Badge variant="secondary" className="capitalize text-[10px] font-semibold">
-                                  {group.category === 'monthly_payment'
-                                    ? 'Monthly'
-                                    : group.category === 'one_time'
-                                    ? 'One-Time'
-                                    : group.category}
-                                </Badge>
-                              </div>
-                              <div className="text-[11px] text-slate-500 flex items-center gap-2">
-                                <span className="font-semibold text-emerald-800 font-mono">BDT {group.perMemberAmount.toLocaleString()} / member</span>
-                                {group.dueDate && <span>• Due: {group.dueDate}</span>}
-                              </div>
-                            </div>
-                          </TableCell>
-
-                          <TableCell>
-                            <div className="flex flex-col gap-0.5">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="font-semibold text-slate-900 text-xs">{modifier.name}</span>
-                                <Badge
-                                  variant="outline"
-                                  className={`text-[10px] px-1.5 py-0 capitalize ${
-                                    modifier.role?.toLowerCase().includes('super')
-                                      ? 'bg-purple-50 text-purple-800 border-purple-200'
-                                      : 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                  }`}
-                                >
-                                  {modifier.role?.replace(/_/g, ' ')}
-                                </Badge>
-                              </div>
-                              <span className="text-[10px] text-slate-500">
-                                {modifier.action} entry
-                              </span>
-                            </div>
-                          </TableCell>
-
-                          <TableCell>
-                            <div className="space-y-1 max-w-xs">
-                              <div className="flex items-center justify-between text-xs">
-                                <span className="font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
-                                  <Users className="h-3 w-3 text-slate-500 inline" />
-                                  <span>{group.paidCount} / {group.totalMembersAssigned} Paid</span>
-                                  {group.partiallyPaidCount > 0 && (
-                                    <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
-                                      {group.partiallyPaidCount} Partial
-                                    </span>
-                                  )}
-                                </span>
-                                <span className={`font-bold text-[11px] ${
-                                  group.isFullyPaid ? 'text-emerald-700' : 'text-amber-800'
-                                }`}>
-                                  {group.memberProgressPercent}%
-                                </span>
-                              </div>
-
-                              <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden flex border border-slate-200 shadow-inner">
-                                <div
-                                  className={`h-full transition-all duration-500 ${
-                                    group.isFullyPaid
-                                      ? 'bg-gradient-to-r from-emerald-600 to-emerald-500'
-                                      : 'bg-gradient-to-r from-emerald-600 to-teal-500'
-                                  }`}
-                                  style={{ width: `${group.memberProgressPercent}%` }}
-                                />
-                                {!group.isFullyPaid && (
-                                  <div
-                                    className="bg-amber-200 h-full transition-all duration-500"
-                                    style={{ width: `${100 - group.memberProgressPercent}%` }}
-                                  />
-                                )}
-                              </div>
-
-                              <div className="text-[10px] text-slate-500 flex justify-between">
-                                <span>Collected: BDT {group.totalCollectedAmount.toLocaleString()}</span>
-                                <span>Target: BDT {group.totalDemandAmount.toLocaleString()}</span>
-                              </div>
-                            </div>
-                          </TableCell>
-
-                          <TableCell>
-                            {group.isFullyPaid ? (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 shadow-2xs">
-                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                                Complete
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
-                                <Clock className="h-3.5 w-3.5 text-amber-600" />
-                                Pending ({group.pendingCount} Unpaid)
-                              </span>
-                            )}
-                          </TableCell>
-
-                          <TableCell className="text-xs text-slate-600 font-medium whitespace-nowrap">
-                            {displayDate}
-                          </TableCell>
-
-                          <TableCell className="text-right whitespace-nowrap">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => toggleExpandGroup(group.key)}
-                              className="h-8 text-xs cursor-pointer border-slate-200 hover:bg-slate-100"
-                            >
-                              {isExpanded ? 'Hide' : 'View Details'} ({group.totalMembersAssigned})
-                              {isExpanded ? <ChevronUp className="h-3.5 w-3.5 ml-1" /> : <ChevronDown className="h-3.5 w-3.5 ml-1" />}
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-
-                        {/* Expandable Members Sub-Table */}
-                        {isExpanded && (
-                          <TableRow className="bg-slate-50/90 hover:bg-slate-50/90">
-                            <TableCell colSpan={6} className="p-4">
-                              <div className="space-y-3 bg-white rounded-xl border border-slate-200 p-4 shadow-2xs">
-                                <div className="flex items-center justify-between flex-wrap gap-2">
-                                  <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
-                                    <Users className="h-4 w-4 text-emerald-700" />
-                                    Assigned Member Details & Receipt Slips for &ldquo;{group.title}&rdquo;
-                                  </h4>
-                                  <span className="text-xs text-slate-500">
-                                    {group.paidCount} of {group.totalMembersAssigned} members cleared ({group.memberProgressPercent}% cleared)
-                                    {group.partiallyPaidCount > 0 && (
-                                      <span className="text-purple-700 font-semibold ml-1.5">
-                                        • {group.partiallyPaidCount} partially paid
-                                      </span>
-                                    )}
-                                  </span>
-                                </div>
-                                <div className="border border-slate-100 rounded-lg overflow-x-auto">
-                                  <Table className="table-fixed w-full min-w-[1000px]">
-                                    <TableHeader className="bg-slate-50">
-                                      <TableRow className="text-xs">
-                                        <TableHead className="w-[14.28%] text-center font-semibold text-slate-700">Member Name</TableHead>
-                                        <TableHead className="w-[14.28%] text-center font-semibold text-slate-700">Member ID</TableHead>
-                                        <TableHead className="w-[14.28%] text-center font-semibold text-slate-700">Date</TableHead>
-<TableHead className="w-[14.28%] text-center font-semibold text-slate-700">Transaction No</TableHead>
-                                        <TableHead className="w-[14.28%] text-center font-semibold text-slate-700">Amount</TableHead>
-                                        <TableHead className="w-[14.28%] text-center font-semibold text-slate-700">Receipt Photo / Proof</TableHead>
-                                        <TableHead className="w-[14.28%] text-center font-semibold text-slate-700">Status</TableHead>
-                                      </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {(() => {
-                                          const memberTrxMap: Record<string | number, Transaction[]> = {};
-                                          group.transactions.forEach((trx) => {
-                                            const mId = trx.member?.id || (trx as any).member_id || `anon_${trx.id}`;
-                                            if (!memberTrxMap[mId]) {
-                                              memberTrxMap[mId] = [];
-                                            }
-                                            memberTrxMap[mId].push(trx);
-                                          });
-
-                                          const memberRows = Object.entries(memberTrxMap).map(([mId, trxList]) => {
-                                            const sorted = [...trxList].sort((a, b) => {
-                                              const dateA = a.updated_at || a.created_at || a.transaction_date || '';
-                                              const dateB = b.updated_at || b.created_at || b.transaction_date || '';
-                                              return dateB.localeCompare(dateA) || (b.id || 0) - (a.id || 0);
-                                            });
-
-                                            const paidList = sorted.filter((t) => t.status === 'paid');
-                                            const pendingList = sorted.filter((t) => t.status === 'pending');
-                                            const rejectedList = sorted.filter((t) => t.status === 'rejected');
-                                            const totalPaidAmount = paidList.reduce((sum, t) => sum + Number(t.amount || 0), 0);
-                                            const totalDueAmount = pendingList.reduce((sum, t) => sum + Number(t.amount || 0), 0);
-                                            const primaryTrx = pendingList[0] || sorted[0];
-                                            const isPartial = paidList.length > 0 && pendingList.length > 0;
-                                            const isFullyPaid = paidList.length > 0 && pendingList.length === 0;
-                                            const isRejectedOnly = rejectedList.length > 0 && paidList.length === 0 && pendingList.length === 0;
-                                            const isSlipReceived = !isFullyPaid && pendingList.some((t) => !!t.receipt_photo);
-
-                                            const latestWithPhoto = sorted.find((t) => t.receipt_photo);
-
-                                            return {
-                                              memberId: mId,
-                                              memberName: primaryTrx.member?.name ?? '-',
-                                              memberNo: primaryTrx.member?.member_no || (primaryTrx.member as any)?.member_profile?.member_no || 'Unassigned',
-                                              transactions: sorted,
-                                              paidList,
-                                              pendingList,
-                                              rejectedList,
-                                              totalPaidAmount,
-                                              totalDueAmount,
-                                              isPartial,
-                                              isFullyPaid,
-                                              isRejectedOnly,
-                                              isSlipReceived,
-                                              primaryTrx,
-                                              latestPhotoTrx: latestWithPhoto,
-                                            };
-                                          }).sort((a, b) => a.memberName.localeCompare(b.memberName));
-
-                                          return memberRows.map((mGroup) => {
-                                            const expandKey = `${group.key}___mem_${mGroup.memberId}`;
-                                            const isExpanded = !!expandedGroups[expandKey];
-                                            const historyCount = mGroup.transactions.length;
-
-                                            return (
-                                              <React.Fragment key={mGroup.memberId}>
-                                                {/* MAIN SUMMARY ROW */}
-                                                <TableRow className={`text-xs hover:bg-slate-50/80 transition-colors ${isExpanded ? 'bg-emerald-50/20' : ''}`}>
-                                                  <TableCell className="p-3 align-middle text-center font-bold text-slate-900 truncate" title={mGroup.memberName}>
-                                                    <div className="flex items-center justify-center gap-1.5">
-                                                      <span>{mGroup.memberName}</span>
-                                                      {historyCount > 1 && (
-                                                        <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
-                                                          {historyCount} records
-                                                        </span>
-                                                      )}
-                                                    </div>
-                                                  </TableCell>
-                                                  <TableCell className="p-3 align-middle text-center font-mono text-emerald-800 font-bold truncate">
-                                                    {mGroup.memberNo}
-                                                  </TableCell>
-                                                  <TableCell className="p-3 align-middle text-center text-slate-600 font-medium whitespace-nowrap">
-                                                    {mGroup.primaryTrx.transaction_date}
-                                                  </TableCell>
-                                                  <TableCell className="p-3 align-middle text-center font-mono text-slate-500 text-[11px] truncate" title={mGroup.primaryTrx.transaction_no}>
-                                                    {mGroup.primaryTrx.transaction_no}
-                                                  </TableCell>
-                                                  <TableCell className="p-3 align-middle text-center font-bold text-slate-900 whitespace-nowrap">
-                                                    {mGroup.isPartial ? (
-                                                      <div className="flex flex-col items-center justify-center">
-                                                        <span className="font-bold text-purple-950">BDT {mGroup.totalDueAmount.toLocaleString()} <span className="text-[10px] text-amber-700 font-bold">(Due)</span></span>
-                                                        <span className="text-[10px] text-emerald-700 font-medium">Paid: BDT {mGroup.totalPaidAmount.toLocaleString()}</span>
-                                                      </div>
-                                                    ) : mGroup.isFullyPaid ? (
-                                                      <span>BDT {mGroup.totalPaidAmount.toLocaleString()}</span>
-                                                    ) : (
-                                                      <span>BDT {mGroup.totalDueAmount.toLocaleString()}</span>
-                                                    )}
-                                                  </TableCell>
-                                                  
-                                                  {/* Receipt Photo & Member Proof Column */}
-                                                  <TableCell className="p-3 align-middle text-center">
-                                                    {mGroup.latestPhotoTrx?.receipt_photo ? (
-                                                      <div className="flex flex-col items-center justify-center gap-1">
-                                                        <ReceiptSlipThumbnail
-                                                          photoUrl={mGroup.latestPhotoTrx.receipt_photo}
-                                                          title={`${mGroup.memberName} - ${mGroup.latestPhotoTrx.month || mGroup.latestPhotoTrx.description || 'Receipt'}`}
-                                                          date={mGroup.latestPhotoTrx.receipt_photo_uploaded_at ? `Uploaded: ${mGroup.latestPhotoTrx.receipt_photo_uploaded_at}` : undefined}
-                                                          isRejected={mGroup.latestPhotoTrx.status === 'rejected'}
-                                                          isPartial={mGroup.isPartial}
-                                                          isSlipReceived={mGroup.isSlipReceived}
-                                                          rejectionReason={mGroup.latestPhotoTrx.rejection_reason}
-                                                          onClick={() => viewReceiptPhoto(
-                                                            mGroup.latestPhotoTrx!.receipt_photo!,
-                                                            `${mGroup.memberName} - ${mGroup.latestPhotoTrx!.month || mGroup.latestPhotoTrx!.description || 'Receipt'}`,
-                                                            mGroup.latestPhotoTrx!.receipt_photo_uploaded_at,
-                                                            mGroup.latestPhotoTrx!.status === 'rejected',
-                                                            mGroup.latestPhotoTrx!.rejection_reason
-                                                          )}
-                                                        />
-                                                        {mGroup.latestPhotoTrx.member_paid_amount && (
-                                                          <span className="text-[10px] font-semibold text-emerald-800 text-center">
-                                                            Proof: BDT {Number(mGroup.latestPhotoTrx.member_paid_amount).toLocaleString()}
-                                                            {mGroup.latestPhotoTrx.member_payment_method && <span className="capitalize text-slate-500 font-normal"> ({mGroup.latestPhotoTrx.member_payment_method.replace(/_/g, ' ')})</span>}
-                                                          </span>
-                                                        )}
-                                                        {mGroup.latestPhotoTrx.member_trx_reference && (
-                                                          <span className="text-[9px] font-mono text-slate-500 truncate max-w-full text-center block" title={mGroup.latestPhotoTrx.member_trx_reference}>
-                                                            Ref: {mGroup.latestPhotoTrx.member_trx_reference}
-                                                          </span>
-                                                        )}
-                                                      </div>
-                                                    ) : (
-                                                      <span className="text-[11px] text-slate-400 italic text-center block">No slip uploaded</span>
-                                                    )}
-                                                  </TableCell>
-
-                                                  {/* Status Column & Actions */}
-                                                  <TableCell className="p-3 align-middle text-center">
-                                                    <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                                                      {mGroup.isFullyPaid ? (
-                                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 whitespace-nowrap shadow-2xs">
-                                                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> Paid
-                                                        </span>
-                                                      ) : mGroup.isPartial ? (
-                                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-purple-50 text-purple-800 border border-purple-300 whitespace-nowrap shadow-2xs">
-                                                          <Wallet className="h-3.5 w-3.5 text-purple-600" /> Partially Paid
-                                                        </span>
-                                                      ) : mGroup.isSlipReceived ? (
-                                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-300 whitespace-nowrap shadow-2xs">
-                                                          <FileCheck className="h-3.5 w-3.5 text-blue-600" /> Received Slip
-                                                        </span>
-                                                      ) : mGroup.isRejectedOnly ? (
-                                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-red-50 text-red-800 border border-red-300 whitespace-nowrap shadow-2xs">
-                                                          <XCircle className="h-3.5 w-3.5 text-red-600" /> Slip Rejected
-                                                        </span>
-                                                      ) : (
-                                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300 whitespace-nowrap shadow-2xs">
-                                                          <Clock className="h-3.5 w-3.5 text-amber-600" /> Due Pending
-                                                        </span>
-                                                      )}
-
-                                                      {/* Expand / Collapse Toggle Button */}
-                                                      <Button
-                                                        size="sm"
-                                                        variant="ghost"
-                                                        onClick={() => toggleExpandGroup(expandKey)}
-                                                        className="h-6 px-1.5 text-[10px] text-slate-600 hover:bg-slate-100 hover:text-slate-900 cursor-pointer"
-                                                        title={isExpanded ? 'Collapse member payment history' : 'Expand member payment history'}
-                                                      >
-                                                        {isExpanded ? (
-                                                          <span className="flex items-center gap-0.5 font-bold text-emerald-800">
-                                                            Hide <ChevronUp className="h-3 w-3" />
-                                                          </span>
-                                                        ) : (
-                                                          <span className="flex items-center gap-0.5">
-                                                            History ({historyCount}) <ChevronDown className="h-3 w-3" />
-                                                          </span>
-                                                        )}
-                                                      </Button>
-                                                    </div>
-                                                  </TableCell>
-                                                </TableRow>
-
-                                                {/* EXPANDABLE MEMBER HISTORY SUB-ROW */}
-                                                {isExpanded && (
-                                                  <TableRow className="bg-slate-50/90 border-t border-b border-emerald-100">
-                                                    <TableCell colSpan={7} className="p-3 pl-8">
-                                                      <div className="space-y-2 bg-white rounded-lg p-3 border border-slate-200 shadow-2xs">
-                                                        <div className="flex items-center justify-between">
-                                                          <h5 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                                                            <Users className="h-3.5 w-3.5 text-emerald-700" />
-                                                            Payment & Slip History for {mGroup.memberName} ({mGroup.memberNo})
-                                                          </h5>
-                                                          <span className="text-[11px] text-slate-500 font-medium">
-                                                            Total Paid: <strong className="text-emerald-700">BDT {mGroup.totalPaidAmount.toLocaleString()}</strong>
-                                                            {mGroup.totalDueAmount > 0 && (
-                                                              <> • Remaining Due: <strong className="text-purple-800">BDT {mGroup.totalDueAmount.toLocaleString()}</strong></>
-                                                            )}
-                                                          </span>
-                                                        </div>
-
-                                                        <div className="overflow-x-auto rounded border border-slate-100">
-                                                          <Table className="table-fixed w-full min-w-[700px]">
-                                                            <TableHeader className="bg-slate-50/80">
-                                                              <TableRow className="text-[11px]">
-                                                                <TableHead className="w-[18%] text-center">Receipt / Trx No</TableHead>
-                                                                <TableHead className="w-[18%] text-center">Type / Description</TableHead>
-                                                                <TableHead className="w-[12%] text-center">Date</TableHead>
-                                                                <TableHead className="w-[14%] text-center">Amount</TableHead>
-                                                                <TableHead className="w-[16%] text-center">Proof Slip</TableHead>
-                                                                <TableHead className="w-[12%] text-center">Status</TableHead>
-                                                                <TableHead className="w-[10%] text-center">Action</TableHead>
-                                                              </TableRow>
-                                                            </TableHeader>
-                                                            <TableBody>
-                                                              {mGroup.transactions.map((histTrx: any) => {
-                                                                const isHistRemainingDue = (histTrx.description && /remaining due/i.test(histTrx.description)) || (histTrx.description && /partial payment/i.test(histTrx.description));
-                                                                const isHistPartialPaid = histTrx.status === 'paid' && (histTrx.description && (/partial payment/i.test(histTrx.description) || /remaining due/i.test(histTrx.description)));
-                                                                const isHistPaid = histTrx.status === 'paid';
-                                                                const isHistRejected = histTrx.status === 'rejected';
-                                                                const isHistSlipReceived = histTrx.status === 'pending' && !!histTrx.receipt_photo;
-                                                                const isHistPendingDue = histTrx.status === 'pending' && !histTrx.receipt_photo;
-
-                                                                const histReceipt = receiptsData?.data?.find(
-                                                                  (r: Receipt) => r.transaction?.id === histTrx.id || (r as any).transaction_id === histTrx.id
-                                                                );
-
-                                                                return (
-                                                                  <TableRow key={histTrx.id} className="text-xs hover:bg-slate-50">
-                                                                    <TableCell className="p-2 text-center font-mono text-[11px] text-slate-600">
-                                                                      {histReceipt ? (
-                                                                        <div className="flex flex-col items-center">
-                                                                          <span className="font-bold text-emerald-900">{histReceipt.receipt_no}</span>
-                                                                          <span className="text-[10px] text-slate-400">Trx: {histTrx.transaction_no}</span>
-                                                                        </div>
-                                                                      ) : (
-                                                                        histTrx.transaction_no
-                                                                      )}
-                                                                    </TableCell>
-                                                                    <TableCell className="p-2 text-center font-medium text-slate-700">
-                                                                      {histTrx.description || histTrx.month || 'Monthly Subscription'}
-                                                                    </TableCell>
-                                                                    <TableCell className="p-2 text-center text-slate-500 whitespace-nowrap">
-                                                                      {histTrx.transaction_date}
-                                                                    </TableCell>
-                                                                    <TableCell className="p-2 text-center font-bold text-slate-900 whitespace-nowrap">
-                                                                      {isHistRemainingDue && histTrx.status === 'pending' ? (
-                                                                        <span className="text-purple-950">BDT {Number(histTrx.amount).toLocaleString()} <span className="text-[10px] text-amber-700 font-bold">(Due)</span></span>
-                                                                      ) : (
-                                                                        <span>BDT {Number(histTrx.amount).toLocaleString()}</span>
-                                                                      )}
-                                                                    </TableCell>
-                                                                    <TableCell className="p-2 text-center">
-                                                                      {histTrx.receipt_photo ? (
-                                                                        <div className="flex flex-col items-center justify-center gap-0.5">
-                                                                          <ReceiptSlipThumbnail
-                                                                            photoUrl={histTrx.receipt_photo}
-                                                                            title={`${mGroup.memberName} - ${histTrx.month || histTrx.description || 'Receipt'}`}
-                                                                            date={histTrx.receipt_photo_uploaded_at ? `Uploaded: ${histTrx.receipt_photo_uploaded_at}` : undefined}
-                                                                            isRejected={isHistRejected}
-                                                                            isPartial={isHistPartialPaid || Boolean(isHistRemainingDue)}
-                                                                            isSlipReceived={isHistSlipReceived}
-                                                                            rejectionReason={histTrx.rejection_reason}
-                                                                            onClick={() => viewReceiptPhoto(
-                                                                              histTrx.receipt_photo!,
-                                                                              `${mGroup.memberName} - ${histTrx.month || histTrx.description || 'Receipt'}`,
-                                                                              histTrx.receipt_photo_uploaded_at,
-                                                                              isHistRejected,
-                                                                              histTrx.rejection_reason
-                                                                            )}
-                                                                          />
-                                                                          {histTrx.member_paid_amount && (
-                                                                            <span className="text-[9px] font-semibold text-emerald-800">
-                                                                              Proof: BDT {Number(histTrx.member_paid_amount).toLocaleString()}
-                                                                            </span>
-                                                                          )}
-                                                                        </div>
-                                                                      ) : (
-                                                                        <span className="text-[10px] text-slate-400 italic">No slip</span>
-                                                                      )}
-                                                                    </TableCell>
-                                                                    <TableCell className="p-2 text-center">
-                                                                      {isHistPaid && isHistPartialPaid ? (
-                                                                        <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[9px] font-bold bg-purple-50 text-purple-800 border border-purple-300 whitespace-nowrap">
-                                                                          <Wallet className="h-2.5 w-2.5 text-purple-600" /> Partially Paid
-                                                                        </span>
-                                                                      ) : isHistPaid ? (
-                                                                        <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 whitespace-nowrap">
-                                                                          <CheckCircle2 className="h-2.5 w-2.5 text-emerald-600" /> Paid
-                                                                        </span>
-                                                                      ) : isHistSlipReceived ? (
-                                                                        <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[9px] font-bold bg-blue-50 text-blue-800 border border-blue-300 whitespace-nowrap">
-                                                                          <FileCheck className="h-2.5 w-2.5 text-blue-600" /> Slip Received
-                                                                        </span>
-                                                                      ) : isHistRejected ? (
-                                                                        <div className="flex flex-col items-center">
-                                                                          <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[9px] font-bold bg-red-50 text-red-800 border border-red-300 whitespace-nowrap">
-                                                                            <XCircle className="h-2.5 w-2.5 text-red-600" /> Rejected
-                                                                          </span>
-                                                                          {histTrx.rejection_reason && (
-                                                                            <span className="text-[9px] text-red-600 italic truncate max-w-[120px]" title={histTrx.rejection_reason}>
-                                                                              {histTrx.rejection_reason}
-                                                                            </span>
-                                                                          )}
-                                                                        </div>
-                                                                      ) : (
-                                                                        <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 text-amber-800 border border-amber-300 whitespace-nowrap">
-                                                                          <Clock className="h-2.5 w-2.5 text-amber-600" /> Due Pending
-                                                                        </span>
-                                                                      )}
-                                                                    </TableCell>
-                                                                    <TableCell className="p-2 text-center">
-                                                                        {(histReceipt || isHistPaid) ? (
-                                                                          (() => {
-                                                                            // Calculate progression up to this transaction
-                                                                            const paidHistory = mGroup.transactions
-                                                                              .filter((t) => t.status === 'paid')
-                                                                              .sort((a, b) => {
-                                                                                const dateA = a.updated_at || a.created_at || a.transaction_date || '';
-                                                                                const dateB = b.updated_at || b.created_at || b.transaction_date || '';
-                                                                                return dateA.localeCompare(dateB) || (a.id || 0) - (b.id || 0);
-                                                                              });
-
-                                                                            const currIndex = paidHistory.findIndex((t) => t.id === histTrx.id);
-                                                                            let cumulativeUpToThis = 0;
-                                                                            let prevUpToThis = 0;
-                                                                            if (currIndex >= 0) {
-                                                                              for (let i = 0; i <= currIndex; i++) {
-                                                                                cumulativeUpToThis += Number(paidHistory[i].amount || 0);
-                                                                                if (i < currIndex) {
-                                                                                  prevUpToThis += Number(paidHistory[i].amount || 0);
-                                                                                }
-                                                                              }
-                                                                            } else {
-                                                                              cumulativeUpToThis = Number(histTrx.amount || 0);
-                                                                            }
-
-                                                                            const totalTarget = mGroup.totalPaidAmount + mGroup.totalDueAmount;
-                                                                            const dueRemainingAfterThis = Math.max(0, totalTarget - cumulativeUpToThis);
-                                                                            
-                                                                            const prevTrxList = currIndex >= 0 ? paidHistory.slice(0, currIndex) : [];
-                                                                            const prevRefs = prevTrxList.map((t) => {
-                                                                              let ref = t.member_trx_reference || '';
-                                                                              if (!ref && t.description) {
-                                                                                const m = t.description.match(/Ref:\s*([^|\n-]+)/i);
-                                                                                if (m) ref = m[1].trim();
-                                                                              }
-                                                                              return {
-                                                                                ref: ref || t.transaction_no,
-                                                                                amount: Number(t.amount || 0),
-                                                                                date: t.transaction_date || '',
-                                                                              };
-                                                                            }).filter((item) => Boolean(item.ref));
-
-                                                                            return (
-                                                                              <Button
-                                                                                size="sm"
-                                                                                variant="outline"
-                                                                                onClick={() => handlePrint(histReceipt, histTrx, {
-                                                                                  isPartial: mGroup.isPartial || isHistPartialPaid,
-                                                                                  totalPaidAmount: cumulativeUpToThis,
-                                                                                  previousPaidAmount: prevUpToThis,
-                                                                                  totalDueAmount: dueRemainingAfterThis,
-                                                                                  totalAssignedAmount: totalTarget,
-                                                                                  previousReferences: prevRefs,
-                                                                                })}
-                                                                                className="h-6 px-1.5 text-[10px] cursor-pointer border-slate-200 hover:bg-emerald-50 hover:text-emerald-800"
-                                                                                title="Print receipt for this payment"
-                                                                              >
-                                                                                <Printer className="h-3 w-3 mr-1" /> Print
-                                                                              </Button>
-                                                                            );
-                                                                          })()
-                                                                        ) : staff && (isHistPendingDue || isHistSlipReceived) ? (
-                                                                        <Button
-                                                                          size="sm"
-                                                                          onClick={() => openCollectPaymentModal(histTrx)}
-                                                                          className="h-6 px-1.5 text-[10px] bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer shadow-2xs"
-                                                                          title="Settle payment"
-                                                                        >
-                                                                          <Wallet className="h-3 w-3 mr-1" /> Settle
-                                                                        </Button>
-                                                                      ) : (
-                                                                        <span className="text-slate-300 text-xs">-</span>
-                                                                      )}
-                                                                    </TableCell>
-                                                                  </TableRow>
-                                                                );
-                                                              })}
-                                                            </TableBody>
-                                                          </Table>
-                                                        </div>
-                                                      </div>
-                                                    </TableCell>
-                                                  </TableRow>
-                                                )}
-                                              </React.Fragment>
-                                            );
-                                          });
-                                        })()}
-                                      </TableBody>
-                                    </Table>
-                                  </div>
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          )}
-                        </React.Fragment>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          </div>
-        )}
-
-      {/* VIEW 2: MEMBERS PAYMENT STATUS MATRIX */}
-      {activeTab === 'members_status' && (
-        <div className="space-y-5">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <Card className="border-slate-200 shadow-2xs bg-white">
-              <CardHeader className="p-4 pb-1">
-                <CardTitle className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
-                  <span>Total Collected</span>
-                  <Wallet className="h-4 w-4 text-emerald-600" />
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-4 pt-1">
-                <div className="text-2xl font-bold text-emerald-800">
-                  BDT {stats.totalCollected.toLocaleString()}
-                </div>
-                <p className="text-[11px] text-slate-500 mt-0.5">Completed contributions</p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-amber-200 bg-amber-50/40 shadow-2xs">
-              <CardHeader className="p-4 pb-1">
-                <CardTitle className="text-xs font-bold text-amber-800 uppercase tracking-wider flex items-center justify-between">
-                  <span>Total Pending Dues</span>
-                  <Clock className="h-4 w-4 text-amber-600" />
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-4 pt-1">
-                <div className="text-2xl font-bold text-amber-950">
-                  BDT {stats.totalPending.toLocaleString()}
-                </div>
-                <p className="text-[11px] text-amber-800 mt-0.5">Awaiting member payment</p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-slate-200 shadow-2xs bg-white">
-              <CardHeader className="p-4 pb-1">
-                <CardTitle className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
-                  <span>Pending Members</span>
-                  <UserX className="h-4 w-4 text-amber-600" />
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-4 pt-1">
-                <div className="text-2xl font-bold text-slate-900">
-                  {stats.countWithPending} <span className="text-xs font-normal text-slate-500">/ {stats.totalMembers}</span>
-                </div>
-                <p className="text-[11px] text-slate-500 mt-0.5">Members with unpaid dues</p>
-              </CardContent>
-            </Card>
-
-            <Card className="border-slate-200 shadow-2xs bg-white">
-              <CardHeader className="p-4 pb-1">
-                <CardTitle className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
-                  <span>Cleared Members</span>
-                  <UserCheck className="h-4 w-4 text-emerald-600" />
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-4 pt-1">
-                <div className="text-2xl font-bold text-emerald-700">
-                  {stats.countCleared} <span className="text-xs font-normal text-slate-500">/ {stats.totalMembers}</span>
-                </div>
-                <p className="text-[11px] text-slate-500 mt-0.5">100% up to date</p>
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <button
-                onClick={() => setMemberStatusFilter('all')}
-                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer ${
-                  memberStatusFilter === 'all'
-                    ? 'bg-slate-900 text-white'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                }`}
-              >
-                All Members ({memberMatrix.length})
-              </button>
-
-              <button
-                onClick={() => setMemberStatusFilter('pending')}
-                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
-                  memberStatusFilter === 'pending'
-                    ? 'bg-amber-600 text-white shadow-2xs'
-                    : 'bg-amber-100/80 text-amber-900 hover:bg-amber-200'
-                }`}
-              >
-                <Clock className="h-3 w-3" />
-                Has Pending Dues ({stats.countWithPending})
-              </button>
-
-              <button
-                onClick={() => setMemberStatusFilter('cleared')}
-                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
-                  memberStatusFilter === 'cleared'
-                    ? 'bg-emerald-700 text-white shadow-2xs'
-                    : 'bg-emerald-100/80 text-emerald-900 hover:bg-emerald-200'
-                }`}
-              >
-                <CheckCircle2 className="h-3 w-3" />
-                All Cleared ({stats.countCleared})
-              </button>
-
-              {stats.countWithRejected > 0 && (
+          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* View Mode Toggle */}
+              <div className="flex items-center bg-slate-100 p-1 rounded-lg">
                 <button
-                  onClick={() => setMemberStatusFilter('rejected')}
+                  onClick={() => setActiveTab('created')}
                   className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
-                    memberStatusFilter === 'rejected'
-                      ? 'bg-red-700 text-white shadow-2xs'
-                      : 'bg-red-100/80 text-red-900 hover:bg-red-200'
+                    activeTab === 'created'
+                      ? 'bg-white text-emerald-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  <XCircle className="h-3 w-3 text-red-600" />
-                  Has Rejected Slips ({stats.countWithRejected})
+                  <ReceiptIcon className="h-3.5 w-3.5 text-emerald-700" />
+                  Demand Batches Created ({createdDemandGroups.length})
+                </button>
+                <button
+                  onClick={() => setActiveTab('members')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeTab === 'members'
+                      ? 'bg-white text-emerald-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Users className="h-3.5 w-3.5 text-emerald-700" />
+                  Member Folders ({stats.totalMembers})
+                </button>
+                <button
+                  onClick={() => setActiveTab('all')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeTab === 'all'
+                      ? 'bg-white text-emerald-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <FileText className="h-3.5 w-3.5 text-emerald-700" />
+                  All Records Table ({allChronologicalItems.length})
+                </button>
+              </div>
+
+              {/* Status Quick Filter Buttons */}
+              <div className="flex items-center gap-1 border-l border-slate-200 pl-2 flex-wrap">
+                <button
+                  onClick={() => setStatusFilter('all')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                    statusFilter === 'all'
+                      ? 'bg-slate-800 text-white shadow-2xs'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  All
+                </button>
+                <button
+                  onClick={() => setStatusFilter('paid')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1 ${
+                    statusFilter === 'paid'
+                      ? 'bg-emerald-700 text-white shadow-2xs'
+                      : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                  }`}
+                >
+                  <CheckCircle2 className="h-3 w-3" /> Cleared
+                </button>
+                <button
+                  onClick={() => setStatusFilter('partial')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1 ${
+                    statusFilter === 'partial'
+                      ? 'bg-purple-700 text-white shadow-2xs'
+                      : 'bg-purple-50 text-purple-800 hover:bg-purple-100'
+                  }`}
+                >
+                  <Wallet className="h-3 w-3" /> Partial
+                </button>
+                <button
+                  onClick={() => setStatusFilter('received_slip')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1 ${
+                    statusFilter === 'received_slip'
+                      ? 'bg-blue-700 text-white shadow-2xs'
+                      : 'bg-blue-50 text-blue-800 hover:bg-blue-100'
+                  }`}
+                >
+                  <FileCheck className="h-3 w-3" /> Slips ({stats.currentReceivedCount})
+                </button>
+                <button
+                  onClick={() => setStatusFilter('pending')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1 ${
+                    statusFilter === 'pending'
+                      ? 'bg-amber-600 text-white shadow-2xs'
+                      : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
+                  }`}
+                >
+                  <Clock className="h-3 w-3" /> Dues ({stats.pureUnpaidDueCount})
+                </button>
+                <button
+                  onClick={() => setStatusFilter('rejected')}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1 ${
+                    statusFilter === 'rejected'
+                      ? 'bg-red-700 text-white shadow-2xs'
+                      : 'bg-red-50 text-red-800 hover:bg-red-100'
+                  }`}
+                >
+                  <XCircle className="h-3 w-3" /> Rejected
+                </button>
+              </div>
+            </div>
+
+            {/* Search Input */}
+            <div className="relative w-full lg:w-72">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <Input
+                placeholder="Search member, folio, TRX ID, or ref..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 pr-8 text-xs h-9 bg-slate-50 border-slate-200"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold"
+                >
+                  ✕
                 </button>
               )}
             </div>
-
-            <div className="relative w-full sm:w-72">
-              <Search className="h-4 w-4 absolute left-3 top-2.5 text-slate-400" />
-              <Input
-                placeholder="Search by name, ID, phone, email..."
-                value={memberSearch}
-                onChange={(e) => setMemberSearch(e.target.value)}
-                className="pl-9 bg-slate-50 text-xs h-9"
-              />
-            </div>
           </div>
 
-          <div className="space-y-3">
-            {loadingUsers || loadingAllTrx ? (
-              <div className="text-center py-12 text-slate-500 bg-white rounded-xl border border-slate-200">
-                Loading member payment statuses...
-              </div>
-            ) : filteredMembers.length === 0 ? (
-              <div className="text-center py-12 text-slate-500 bg-white rounded-xl border border-slate-200">
-                No members found matching the selected filter.
-              </div>
-            ) : (
-              filteredMembers.map((item) => {
-                const { member, pendingTransactions, paidTransactions, totalPendingAmount, totalPaidAmount, hasPending, completionPercent } = item;
-                const isExpanded = !!expandedMembers[member.id];
+          {/* =========================================================================
+              TAB 1: CREATED DEMAND BATCHES (CAMPAIGNS)
+              ========================================================================= */}
+          {activeTab === 'created' && (
+            <div className="space-y-3.5">
+              {loadingTransactions ? (
+                <div className="p-8 text-center bg-white rounded-xl border border-slate-200 text-slate-500 text-sm">
+                  Loading demand batches...
+                </div>
+              ) : filteredCreatedGroups.length === 0 ? (
+                <div className="p-12 text-center bg-white rounded-xl border border-slate-200">
+                  <ReceiptIcon className="h-10 w-10 text-slate-300 mx-auto mb-2" />
+                  <p className="text-sm font-semibold text-slate-700">No demand batches found</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Try clearing or adjusting your search filters.</p>
+                </div>
+              ) : (
+                filteredCreatedGroups.map((group) => {
+                  const isExpanded = !!expandedGroups[group.key];
+                  const modifier = getModifierInfo(group);
 
-                return (
-                  <div
-                    key={member.id}
-                    className={`bg-white rounded-xl border transition-all duration-200 overflow-hidden shadow-2xs ${
-                      hasPending ? 'border-amber-200 hover:border-amber-300' : 'border-slate-200 hover:border-emerald-200'
-                    }`}
-                  >
-                    <div className="p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                      <div className="flex items-center gap-3.5 min-w-[280px]">
-                        <div className={`w-11 h-11 rounded-xl flex items-center justify-center font-bold text-sm shadow-inner ${
-                          hasPending
-                            ? 'bg-amber-100 text-amber-900 border border-amber-200'
-                            : 'bg-emerald-100 text-emerald-900 border border-emerald-200'
-                        }`}>
-                          {member.name.slice(0, 2).toUpperCase()}
-                        </div>
-
-                        <div className="space-y-0.5">
+                  return (
+                    <div
+                      key={group.key}
+                      className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden transition-all"
+                    >
+                      <div
+                        onClick={() => toggleExpandGroup(group.key)}
+                        className="p-4 hover:bg-slate-50/70 cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors"
+                      >
+                        <div className="space-y-1.5 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-bold text-slate-900 text-sm">{member.name}</span>
-                            {member.member_profile?.member_no && (
-                              <span className="font-mono text-[10px] font-bold bg-slate-100 text-slate-800 border border-slate-200 px-2 py-0.2 rounded-md">
-                                {member.member_profile.member_no}
-                              </span>
-                            )}
-                            {(() => {
-                              const slipReceivedCount = pendingTransactions.filter((t) => !!t.receipt_photo).length;
-                              const duePendingCount = pendingTransactions.filter((t) => !t.receipt_photo).length;
-                              const partiallyPaidCount = pendingTransactions.filter((t) => {
-                                const dueKey = `${member.id}_${t.payment_category || t.type || ''}_${t.month || ''}_${t.description || ''}`;
-                                return paidTransactions.some((p) => {
-                                  const pKey = `${member.id}_${p.payment_category || p.type || ''}_${p.month || ''}_${p.description || ''}`;
-                                  return pKey === dueKey || (t.month && p.month === t.month);
-                                });
-                              }).length;
-
-                              return (
-                                <>
-                                  {partiallyPaidCount > 0 && (
-                                    <span className="text-[10px] font-bold px-2 py-0.2 rounded-full border bg-purple-50 text-purple-800 border-purple-300 flex items-center gap-1">
-                                      <Wallet className="h-3 w-3 text-purple-600" />
-                                      {partiallyPaidCount === 1 ? 'Partially Paid' : `${partiallyPaidCount} Partially Paid`}
-                                    </span>
-                                  )}
-                                  {slipReceivedCount > 0 && (
-                                    <span className="text-[10px] font-bold px-2 py-0.2 rounded-full border bg-blue-50 text-blue-800 border-blue-300 flex items-center gap-1">
-                                      <FileCheck className="h-3 w-3 text-blue-600" />
-                                      {slipReceivedCount === 1 ? 'Received Slip' : `${slipReceivedCount} Received Slips`}
-                                    </span>
-                                  )}
-                                  {duePendingCount > 0 && (
-                                    <span className="text-[10px] font-bold px-2 py-0.2 rounded-full border bg-amber-50 text-amber-800 border-amber-300 flex items-center gap-1">
-                                      <Clock className="h-3 w-3 text-amber-600" />
-                                      {duePendingCount === 1 ? 'Due Pending' : `${duePendingCount} Due Pending`}
-                                    </span>
-                                  )}
-                                  {!hasPending && paidTransactions.length > 0 && (
-                                    <span className="text-[10px] font-bold px-2 py-0.2 rounded-full border bg-emerald-50 text-emerald-800 border-emerald-300 flex items-center gap-1">
-                                      <CheckCircle2 className="h-3 w-3 text-emerald-600" />
-                                      All Cleared
-                                    </span>
-                                  )}
-                                </>
-                              );
-                            })()}
-                            {item.hasRejected && (
-                              <span className="text-[10px] font-bold px-2 py-0.2 rounded-full border bg-red-50 text-red-800 border-red-300 flex items-center gap-1">
-                                <XCircle className="h-3 w-3 text-red-600" />
-                                {item.rejectedTransactions.length} Slip Rejected
+                            <Badge
+                              className={`text-[10px] font-bold uppercase tracking-wider ${
+                                group.category === 'monthly_payment'
+                                  ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                                  : 'bg-indigo-100 text-indigo-900 border-indigo-300'
+                              }`}
+                            >
+                              {group.category === 'monthly_payment' ? 'Monthly Subscription' : 'Special Assessment'}
+                            </Badge>
+                            <h3 className="font-bold text-slate-900 text-base">{group.title}</h3>
+                            {group.transaction_no && (
+                              <span className="font-mono text-xs font-bold text-slate-600 px-2 py-0.5 bg-slate-100 rounded border border-slate-200">
+                                {group.transaction_no}
                               </span>
                             )}
                           </div>
 
-                          <div className="flex items-center gap-3 text-xs text-slate-500">
-                            {member.member_profile?.phone && <span>{member.member_profile.phone}</span>}
+                          <div className="flex items-center gap-4 text-xs text-slate-500 flex-wrap">
+                            <span>Per Member Demand: <strong className="text-slate-800 font-mono">BDT {group.perMemberAmount.toLocaleString()}</strong></span>
                             <span>•</span>
-                            <span>{member.email}</span>
+                            <span>Target: <strong className="text-slate-800">{group.totalMembersAssigned} Members</strong></span>
+                            <span>•</span>
+                            <span>Due Date: <strong className="text-slate-800 font-mono">{group.dueDate || 'Open'}</strong></span>
+                            <span>•</span>
+                            <span className="text-slate-400 text-[11px]">
+                              {modifier.action} by <strong className="text-slate-600 font-semibold">{modifier.name}</strong> ({modifier.role})
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Progress & Quick Stats */}
+                        <div className="flex items-center gap-4">
+                          <div className="text-right min-w-36">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <span className="text-xs font-bold text-emerald-800 font-mono">
+                                BDT {group.totalCollectedAmount.toLocaleString()}
+                              </span>
+                              <span className="text-xs text-slate-400 font-mono">
+                                / BDT {group.totalDemandAmount.toLocaleString()}
+                              </span>
+                            </div>
+                            {/* Progress bar */}
+                            <div className="w-full bg-slate-100 h-2 rounded-full mt-1.5 overflow-hidden border border-slate-200">
+                              <div
+                                className={`h-full transition-all ${
+                                  group.isFullyPaid ? 'bg-emerald-600' : 'bg-emerald-500'
+                                }`}
+                                style={{ width: `${group.progressPercent}%` }}
+                              />
+                            </div>
+                            <div className="flex justify-between items-center text-[10px] text-slate-500 mt-1">
+                              <span>{group.paidCount} of {group.totalMembersAssigned} Settled</span>
+                              <span className="font-bold text-emerald-800">{group.progressPercent}%</span>
+                            </div>
+                          </div>
+
+                          <div className="p-1 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100">
+                            {isExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
                           </div>
                         </div>
                       </div>
 
-                      <div className="flex-1 max-w-md space-y-1.5">
-                        <div className="flex items-center justify-between text-xs font-semibold">
-                          <span className="text-emerald-700">Paid: BDT {totalPaidAmount.toLocaleString()}</span>
-                          {hasPending && (
-                            <span className="text-amber-800 font-bold">
-                              Due: BDT {totalPendingAmount.toLocaleString()}
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden flex">
-                          <div
-                            className="bg-emerald-600 h-full transition-all duration-300"
-                            style={{ width: `${completionPercent}%` }}
-                          />
-                          {hasPending && (
-                            <div
-                              className="bg-amber-400 h-full transition-all duration-300"
-                              style={{ width: `${100 - completionPercent}%` }}
-                            />
-                          )}
-                        </div>
-                        <div className="text-[10px] text-slate-400 text-right">
-                          {completionPercent}% completed ({paidTransactions.length} paid, {pendingTransactions.length} pending)
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => toggleExpandMember(member.id)}
-                          className="h-8 text-xs cursor-pointer text-slate-700 border-slate-200 hover:bg-slate-100"
-                        >
-                          {isExpanded ? (
-                            <>
-                              Hide Details <ChevronUp className="h-3.5 w-3.5 ml-1" />
-                            </>
-                          ) : (
-                            <>
-                              View Details & Slips ({item.transactions.length}) <ChevronDown className="h-3.5 w-3.5 ml-1" />
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                    </div>
-
-                    {isExpanded && (
-                      <div className="border-t border-slate-100 bg-slate-50/60 p-4 space-y-4">
-                        {pendingTransactions.length > 0 && (
-                          <div className="space-y-2">
-                            <h4 className="text-xs font-bold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
-                              <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
-                              Unpaid / Pending Payment Dues ({pendingTransactions.length})
+                      {/* Expandable Member List under this Demand */}
+                      {isExpanded && (
+                        <div className="border-t border-slate-200 p-4 bg-slate-50/50 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600">
+                              Member Assessment Breakdown ({group.transactions.length} Records)
                             </h4>
+                          </div>
 
-                            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                              {pendingTransactions.map((pt) => {
-                                const isRemainingDue = (pt.description && /remaining due/i.test(pt.description)) || (pt.description && /partial payment/i.test(pt.description));
+                          <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+                            <Table className="table-fixed w-full">
+                              <TableHeader className="bg-slate-50">
+                                <TableRow className="text-[11px] font-bold text-slate-700">
+                                  <TableHead className="w-[26%] text-left py-3 px-3">MEMBER &amp; FOLIO</TableHead>
+                                  <TableHead className="w-[18%] text-center py-3 px-2">TRANSACTION NO / REF</TableHead>
+                                  <TableHead className="w-[14%] text-center py-3 px-2">STATUS</TableHead>
+                                  <TableHead className="w-[14%] text-center py-3 px-2">SLIP PROOF</TableHead>
+                                  <TableHead className="w-[14%] text-right py-3 px-2">ASSESSED</TableHead>
+                                  <TableHead className="w-[14%] text-right py-3 px-3">PAID (BDT)</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {group.transactions.map((trx) => {
+                                  const m = trx.member;
+                                  const isPaid = trx.status === 'paid';
+                                  const isRejected = trx.status === 'rejected';
+                                  const isPartial = (trx as any).is_partial || (trx.description || '').toLowerCase().includes('partial');
+                                  const parsedRef = extractInputtedReference(trx);
 
-                                return (
-                                <div
-                                  key={pt.id}
-                                  className={`p-3.5 bg-white rounded-lg border shadow-2xs flex flex-col justify-between gap-3 ${
-                                    isRemainingDue ? 'border-purple-300' : 'border-amber-300'
-                                  }`}
-                                >
-                                  <div>
-                                    <div className="flex items-center justify-between">
-                                      <span className="font-bold text-xs text-slate-900">
-                                        {pt.month ? pt.month : pt.description || 'Assigned Payment'}
-                                      </span>
-                                      <div className="flex flex-col items-end">
-                                        <span className={`font-mono text-xs font-bold ${isRemainingDue ? 'text-purple-900' : 'text-amber-900'}`}>
-                                          BDT {Number(pt.amount).toLocaleString()}
-                                        </span>
-                                        {isRemainingDue && (
-                                          <span className="text-[9px] text-purple-700 font-bold bg-purple-50 px-1.5 py-0.2 rounded border border-purple-200 mt-0.5">
-                                            Remaining Due
+                                  return (
+                                    <TableRow key={trx.id} className="text-xs hover:bg-slate-50/80">
+                                      <TableCell className="py-2.5 px-3">
+                                        <div className="font-bold text-slate-900">{m?.name || 'Member'}</div>
+                                        <div className="text-[11px] font-mono text-slate-500">
+                                          FOLIO #{m?.member_no || (m as any)?.member_profile?.member_no || '-'}
+                                        </div>
+                                      </TableCell>
+
+                                      <TableCell className="py-2.5 px-2 text-center font-mono font-semibold text-slate-800">
+                                        <div>{trx.transaction_no || '-'}</div>
+                                        {parsedRef && parsedRef !== '-' && parsedRef !== trx.transaction_no && (
+                                          <span className="inline-block mt-0.5 text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-50 text-amber-900 border border-amber-200">
+                                            Ref: {parsedRef}
                                           </span>
                                         )}
-                                      </div>
-                                    </div>
-                                    <div className="text-[11px] text-slate-500 mt-1 flex items-center justify-between">
-                                      <span>Due Date: {pt.transaction_date}</span>
-                                      <span className="font-mono text-[10px] text-slate-400">{pt.transaction_no}</span>
-                                    </div>
+                                      </TableCell>
 
-                                    <div className="mt-2.5 pt-2 border-t border-slate-100 flex flex-col gap-1.5">
-                                      {pt.receipt_photo ? (
-                                        <>
-                                          <div className="flex items-center justify-between flex-wrap gap-1">
-                                            <ReceiptSlipThumbnail
-                                              photoUrl={pt.receipt_photo}
-                                              title={`${member.name} - ${pt.month || pt.description || 'Receipt Slip'}`}
-                                              date={pt.receipt_photo_uploaded_at ? `Uploaded: ${pt.receipt_photo_uploaded_at}` : undefined}
-                                              isRejected={pt.status === 'rejected'}
-                                              isPartial={Boolean(isRemainingDue)}
-                                              isSlipReceived={!isRemainingDue && pt.status === 'pending' && !!pt.receipt_photo}
-                                              rejectionReason={pt.rejection_reason}
-                                              onClick={() => viewReceiptPhoto(pt.receipt_photo!, `${member.name} - ${pt.month || pt.description || 'Receipt Slip'}`, pt.receipt_photo_uploaded_at, pt.status === 'rejected', pt.rejection_reason)}
-                                            />
-                                            {pt.member_paid_amount && (
-                                              <span className={`text-[11px] font-bold ${isRemainingDue ? 'text-purple-800' : 'text-emerald-800'}`}>
-                                                Paid: BDT {Number(pt.member_paid_amount).toLocaleString()}
-                                              </span>
-                                            )}
-                                          </div>
-                                          {(pt.member_trx_reference || pt.member_payment_method || pt.member_comment) && (
-                                            <div className="text-[10px] text-slate-600 bg-slate-50 p-1.5 rounded border border-slate-200">
-                                              {pt.member_payment_method && (
-                                                <span className="font-semibold capitalize text-emerald-900">
-                                                  {pt.member_payment_method.replace(/_/g, ' ') || 'mobile_banking'}
-                                                </span>
-                                              )}
-                                              {pt.member_trx_reference && (
-                                                <span className="font-mono ml-1.5 font-bold text-slate-700">
-                                                  ID: {pt.member_trx_reference}
-                                                </span>
-                                              )}
-                                              {pt.member_comment && (
-                                                <div className="italic text-slate-500 mt-0.5">&ldquo;{pt.member_comment}&rdquo;</div>
-                                              )}
-                                            </div>
-                                          )}
-                                        </>
-                                      ) : (
-                                        <span className="text-[11px] text-slate-400 italic">No slip uploaded by member</span>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  {staff && (
-                                    <div className="flex items-center gap-2">
-                                      <Button
-                                        size="sm"
-                                        onClick={() => openCollectPaymentModal(pt)}
-                                        className="flex-1 h-8 text-xs bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer shadow-2xs"
-                                      >
-                                        <Wallet className="h-3.5 w-3.5 mr-1" /> Collect / Settle
-                                      </Button>
-                                      {pt.receipt_photo && (
-                                        <Button
-                                          size="sm"
-                                          variant="outline"
-                                          onClick={() => openRejectProofModal(pt)}
-                                          className="h-8 px-2.5 text-xs border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800 cursor-pointer shadow-2xs"
-                                          title="Reject invalid payment proof slip"
-                                        >
-                                          <XCircle className="h-3.5 w-3.5 text-red-600" />
-                                        </Button>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
-
-                        {item.rejectedTransactions.length > 0 && (
-                          <div className="space-y-2">
-                            <h4 className="text-xs font-bold text-red-900 uppercase tracking-wider flex items-center gap-1.5">
-                              <XCircle className="h-3.5 w-3.5 text-red-600" />
-                              Rejected Payment Proof Slips & Declined Claims ({item.rejectedTransactions.length})
-                            </h4>
-
-                            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                              {item.rejectedTransactions.map((rt) => (
-                                <div
-                                  key={rt.id}
-                                  className="p-3.5 bg-red-50/50 rounded-lg border border-red-200 shadow-2xs flex flex-col justify-between gap-3"
-                                >
-                                  <div>
-                                    <div className="flex items-center justify-between">
-                                      <span className="font-bold text-xs text-slate-900">
-                                        {rt.month ? rt.month : rt.description || 'Assigned Fee'}
-                                      </span>
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800 border border-red-300">
-                                        <XCircle className="h-3 w-3 text-red-600" /> Rejected
-                                      </span>
-                                    </div>
-                                    <div className="text-[11px] text-slate-500 mt-1 flex items-center justify-between">
-                                      <span>Due: <b className="font-mono text-slate-800">BDT {Number(rt.amount).toLocaleString()}</b></span>
-                                      <span className="font-mono text-[10px] text-slate-400">{rt.transaction_no}</span>
-                                    </div>
-
-                                    {/* Decline Reason Banner */}
-                                    <div className="mt-2 p-2 bg-red-100/90 border border-red-300 rounded text-xs text-red-950">
-                                      <span className="font-bold text-[10px] uppercase text-red-800 flex items-center gap-1">
-                                        <AlertCircle className="h-3 w-3 text-red-600" /> Decline Reason:
-                                      </span>
-                                      <p className="text-[11px] italic mt-0.5">&ldquo;{rt.rejection_reason || 'Payment proof slip could not be verified by Admin.'}&rdquo;</p>
-                                    </div>
-
-                                    {/* Slip thumbnail & info */}
-                                    {rt.receipt_photo && (
-                                      <div className="mt-2.5 pt-2 border-t border-red-200 flex flex-col gap-1.5">
-                                        <div className="flex items-center justify-between flex-wrap gap-1">
-                                          <ReceiptSlipThumbnail
-                                            photoUrl={rt.receipt_photo}
-                                            title={`${member.name} - ${rt.month || rt.description || 'Rejected Slip'}`}
-                                            date={rt.receipt_photo_uploaded_at ? `Uploaded: ${rt.receipt_photo_uploaded_at}` : undefined}
-                                            isRejected={true}
-                                            rejectionReason={rt.rejection_reason}
-                                            onClick={() => viewReceiptPhoto(
-                                              rt.receipt_photo!,
-                                              `${member.name} - ${rt.month || rt.description || 'Rejected Slip'}`,
-                                              rt.receipt_photo_uploaded_at,
-                                              true,
-                                              rt.rejection_reason
-                                            )}
-                                          />
-                                          {rt.member_paid_amount && (
-                                            <span className="text-[11px] font-bold text-red-950">
-                                              Claimed: BDT {Number(rt.member_paid_amount).toLocaleString()}
-                                            </span>
-                                          )}
-                                        </div>
-                                        {(rt.member_trx_reference || rt.member_payment_method || rt.member_comment) && (
-                                          <div className="text-[10px] text-slate-700 bg-white p-1.5 rounded border border-red-200">
-                                            {rt.member_payment_method && (
-                                              <span className="font-semibold capitalize text-slate-900">
-                                                {rt.member_payment_method.replace(/_/g, ' ')}
-                                              </span>
-                                            )}
-                                            {rt.member_trx_reference && (
-                                              <span className="font-mono ml-1.5 font-bold text-slate-800">
-                                                ID: {rt.member_trx_reference}
-                                              </span>
-                                            )}
-                                            {rt.member_comment && (
-                                              <div className="italic text-slate-500 mt-0.5">&ldquo;{rt.member_comment}&rdquo;</div>
-                                            )}
-                                          </div>
+                                      <TableCell className="py-2.5 px-2 text-center">
+                                        {isPaid ? (
+                                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                            <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Settled
+                                          </span>
+                                        ) : isPartial ? (
+                                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-800 border border-purple-200">
+                                            <Wallet className="h-3 w-3 text-purple-600" /> Partial
+                                          </span>
+                                        ) : isRejected ? (
+                                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-red-50 text-red-800 border border-red-200">
+                                            <XCircle className="h-3 w-3 text-red-600" /> Rejected
+                                          </span>
+                                        ) : trx.receipt_photo ? (
+                                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-200">
+                                            <FileCheck className="h-3 w-3 text-blue-600" /> Slip Uploaded
+                                          </span>
+                                        ) : (
+                                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                                            <Clock className="h-3 w-3 text-amber-600" /> Due Pending
+                                          </span>
                                         )}
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
+                                      </TableCell>
+
+                                      <TableCell className="py-2.5 px-2 text-center">
+                                        {trx.receipt_photo ? (
+                                          <ReceiptSlipThumbnail
+                                            photoUrl={trx.receipt_photo}
+                                            title={`Slip for ${m?.name || 'Member'}`}
+                                            date={trx.receipt_photo_uploaded_at || trx.transaction_date}
+                                            isRejected={isRejected}
+                                            rejectionReason={trx.rejection_reason}
+                                            onClick={() =>
+                                              openPhotoPreviewModal(
+                                                trx.receipt_photo!,
+                                                `Payment Slip: ${m?.name || 'Member'} (${group.title})`,
+                                                trx.receipt_photo_uploaded_at || trx.transaction_date || '',
+                                                isRejected,
+                                                trx.rejection_reason
+                                              )
+                                            }
+                                          />
+                                        ) : (
+                                          <span className="text-[11px] text-slate-400 italic">None</span>
+                                        )}
+                                      </TableCell>
+
+                                      <TableCell className="py-2.5 px-2 text-right font-mono font-semibold text-slate-800">
+                                        BDT {Number(trx.amount || group.perMemberAmount).toLocaleString()}
+                                      </TableCell>
+
+                                      <TableCell className="py-2.5 px-3 text-right font-mono font-bold text-emerald-800">
+                                        {isPaid ? `BDT ${Number(trx.amount).toLocaleString()}` : (isPartial && trx.member_paid_amount ? `BDT ${Number(trx.member_paid_amount).toLocaleString()}` : '-')}
+                                      </TableCell>
+                                    </TableRow>
+                                  );
+                                })}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {/* =========================================================================
+              TAB 2: MEMBER FOLDERS (MEMBER-WISE LEDGER BREAKDOWN)
+              ========================================================================= */}
+          {activeTab === 'members' && (
+            <div className="space-y-3.5">
+              {loadingTransactions ? (
+                <div className="p-8 text-center bg-white rounded-xl border border-slate-200 text-slate-500 text-sm">
+                  Loading member ledgers...
+                </div>
+              ) : filteredMemberGroups.length === 0 ? (
+                <div className="p-12 text-center bg-white rounded-xl border border-slate-200">
+                  <Users className="h-10 w-10 text-slate-300 mx-auto mb-2" />
+                  <p className="text-sm font-semibold text-slate-700">No member records found</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Try clearing or adjusting your search filters.</p>
+                </div>
+              ) : (
+                filteredMemberGroups.map((memberGroup) => {
+                  const isExpanded = !!expandedMembers[memberGroup.memberId];
+                  const recoveryRate = memberGroup.netAmount > 0
+                    ? Math.round((memberGroup.totalPaid / memberGroup.netAmount) * 100)
+                    : 100;
+
+                  return (
+                    <div
+                      key={memberGroup.memberId}
+                      className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden transition-all"
+                    >
+                      <div
+                        onClick={() => toggleExpandMember(memberGroup.memberId)}
+                        className="p-4 hover:bg-slate-50/70 cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-900 font-bold flex items-center justify-center text-sm shadow-2xs border border-emerald-200">
+                            {memberGroup.memberName.slice(0, 1).toUpperCase()}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-bold text-slate-900 text-base">{memberGroup.memberName}</h3>
+                              <span className="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                                FOLIO #{memberGroup.memberNo}
+                              </span>
+                              <span className="text-xs text-slate-400 font-medium">({memberGroup.memberRole})</span>
+                            </div>
+                            <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
+                              {memberGroup.memberPhone && memberGroup.memberPhone !== '-' && (
+                                <span>Phone: <strong className="text-slate-700 font-mono">{memberGroup.memberPhone}</strong></span>
+                              )}
+                              {memberGroup.memberEmail && (
+                                <span>Email: <strong className="text-slate-700">{memberGroup.memberEmail}</strong></span>
+                              )}
                             </div>
                           </div>
-                        )}
+                        </div>
 
-                        <div className="space-y-2">
-                          <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                            Completed / Paid Records & Receipt Photos ({paidTransactions.length})
-                          </h4>
+                        {/* Financial Ledger Balance Badges & Print Action */}
+                        <div className="flex items-center gap-4 flex-wrap md:flex-nowrap">
+                          <div className="flex items-center gap-2">
+                            <span className="px-3 py-1 rounded-lg text-xs font-mono font-bold bg-slate-100 text-slate-800 border border-slate-200">
+                              Assessed: BDT {memberGroup.netAmount.toLocaleString()}
+                            </span>
+                            <span className="px-3 py-1 rounded-lg text-xs font-mono font-bold bg-emerald-100 text-emerald-900 border border-emerald-300">
+                              Settled: BDT {memberGroup.totalPaid.toLocaleString()}
+                            </span>
+                            <span className={`px-3 py-1 rounded-lg text-xs font-mono font-bold border ${
+                              memberGroup.totalDue > 0
+                                ? 'bg-amber-100 text-amber-900 border-amber-300'
+                                : 'bg-slate-50 text-slate-500 border-slate-200'
+                            }`}>
+                              Due: BDT {memberGroup.totalDue.toLocaleString()}
+                            </span>
+                          </div>
 
-                          {paidTransactions.length === 0 ? (
-                            <p className="text-xs text-slate-400 py-2">No completed payments recorded yet.</p>
-                          ) : (
-                            <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-                              <Table className="table-fixed w-full min-w-[750px]">
-                                <TableHeader className="bg-slate-50">
-                                  <TableRow className="text-xs">
-                                    <TableHead className="w-[18%] text-center font-semibold text-slate-700">Receipt / Trx No</TableHead>
-                                    <TableHead className="w-[20%] text-center font-semibold text-slate-700">Month / Description</TableHead>
-                                    <TableHead className="w-[13%] text-center font-semibold text-slate-700">Amount</TableHead>
-                                    <TableHead className="w-[14%] text-center font-semibold text-slate-700">Receipt Photo / Slip</TableHead>
-                                    <TableHead className="w-[12%] text-center font-semibold text-slate-700">Status</TableHead>
-                                    <TableHead className="w-[11%] text-center font-semibold text-slate-700">Payment Date</TableHead>
-                                    <TableHead className="w-[12%] text-center font-semibold text-slate-700">Action</TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {paidTransactions.map((paid: any) => {
-                                    const isPartialPaid = (paid.description && /partial payment/i.test(paid.description)) || (paid.description && /remaining due/i.test(paid.description));
-                                    const linkedReceipt = paid.receipt;
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handlePrintMemberReport(memberGroup);
+                            }}
+                            className="h-8 gap-1.5 border-emerald-300 text-emerald-800 hover:bg-emerald-50 text-xs font-bold cursor-pointer"
+                          >
+                            <Printer className="h-3.5 w-3.5" /> Print Statement
+                          </Button>
 
-                                    return (
-                                      <TableRow key={paid.id} className="text-xs">
-                                        <TableCell className="p-3 align-middle text-center font-mono font-medium text-slate-600">
-                                          {linkedReceipt ? (
-                                            <div className="flex flex-col items-center">
-                                              <span className="font-bold text-emerald-900">{linkedReceipt.receipt_no}</span>
-                                              <span className="text-[10px] text-slate-400">Trx: {paid.transaction_no}</span>
-                                            </div>
-                                          ) : (
-                                            paid.transaction_no
-                                          )}
-                                        </TableCell>
-                                        <TableCell className="p-3 align-middle text-center font-medium text-slate-800">{paid.month || paid.description || paid.type}</TableCell>
-                                        <TableCell className="p-3 align-middle text-center font-bold text-slate-900">BDT {Number(paid.amount).toLocaleString()}</TableCell>
-                                        
-                                        <TableCell className="p-3 align-middle text-center">
-                                          {paid.receipt_photo ? (
-                                            <div className="flex justify-center">
-                                              <ReceiptSlipThumbnail
-                                                photoUrl={paid.receipt_photo}
-                                                title={`${member.name} - ${paid.month || paid.description || 'Receipt Slip'}`}
-                                                date={paid.receipt_photo_uploaded_at ? `Uploaded: ${paid.receipt_photo_uploaded_at}` : undefined}
-                                                isRejected={paid.status === 'rejected'}
-                                                isPartial={Boolean(isPartialPaid)}
-                                                rejectionReason={paid.rejection_reason}
-                                                onClick={() => viewReceiptPhoto(
-                                                  paid.receipt_photo!,
-                                                  `${member.name} - ${paid.month || paid.description || 'Receipt Slip'}`,
-                                                  paid.receipt_photo_uploaded_at,
-                                                  paid.status === 'rejected',
-                                                  paid.rejection_reason
-                                                )}
-                                              />
-                                            </div>
-                                          ) : (
-                                            <span className="text-[11px] text-slate-400 italic text-center block">-</span>
-                                          )}
-                                        </TableCell>
-
-                                        <TableCell className="p-3 align-middle text-center">
-                                          <div className="flex justify-center">
-                                            {isPartialPaid ? (
-                                              <div className="flex flex-col items-center justify-center gap-0.5">
-                                                <Badge className="bg-purple-50 text-purple-800 border-purple-300 text-[10px]">
-                                                  Partially Paid
-                                                </Badge>
-                                                <span className="text-[9px] text-purple-700 font-semibold">Partial Payment</span>
-                                              </div>
-                                            ) : (
-                                              <Badge className="bg-emerald-50 text-emerald-800 border-emerald-300 text-[10px]">
-                                                Paid
-                                              </Badge>
-                                            )}
-                                          </div>
-                                        </TableCell>
-                                        <TableCell className="p-3 align-middle text-center text-slate-500">{paid.transaction_date}</TableCell>
-                                        
-                                        <TableCell className="p-3 align-middle text-center">
-                                          <Button
-                                            size="sm"
-                                            variant="outline"
-                                            onClick={() => handlePrint(linkedReceipt, paid)}
-                                            className="h-7 px-2 text-xs border-emerald-300 text-emerald-800 hover:bg-emerald-50 cursor-pointer shadow-2xs font-bold"
-                                            title="Print official society receipt"
-                                          >
-                                            <Printer className="h-3 w-3 mr-1" /> Print
-                                          </Button>
-                                        </TableCell>
-                                      </TableRow>
-                                    );
-                                  })}
-                                </TableBody>
-                              </Table>
-                            </div>
-                          )}
+                          <div className="p-1 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100">
+                            {isExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+                          </div>
                         </div>
                       </div>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-      )}
 
-      {/* DIALOG: COLLECT PAYMENT */}
-      <Dialog open={openCollect} onOpenChange={setOpenCollect}>
-        <DialogContent className={collectingTrx?.receipt_photo ? "w-[96vw] max-w-6xl xl:max-w-7xl max-h-[95vh] overflow-y-auto p-5 sm:p-6" : "max-w-lg"}>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-slate-900 text-lg">
-              <Wallet className="h-5 w-5 text-emerald-700" />
-              Collect Payment & Settle Dues
-            </DialogTitle>
-          </DialogHeader>
+                      {/* Expandable Member Months */}
+                      {isExpanded && (
+                        <div className="border-t border-slate-200 p-4 bg-slate-50/50 space-y-4">
+                          {memberGroup.monthGroups.length === 0 ? (
+                            <p className="text-xs text-slate-400 italic">No transaction entries found for this member.</p>
+                          ) : (
+                            memberGroup.monthGroups.map((mg) => {
+                              const isMonthExpanded = expandedMonths[`${memberGroup.memberId}_${mg.monthKey}`] !== false;
 
-          {collectingTrx && (
-            <div className={collectingTrx.receipt_photo ? "grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch pt-2" : "pt-1"}>
-              {collectingTrx.receipt_photo && (
-                <div className="lg:col-span-6 flex flex-col justify-between bg-slate-950 border border-slate-800 rounded-2xl p-4 shadow-inner text-white min-h-[500px] h-full">
-                  <div className="flex items-center justify-between pb-2.5 border-b border-slate-800 text-xs">
-                    <span className="font-bold text-emerald-400 flex items-center gap-1.5">
-                      <ImageIcon className="h-4 w-4 text-emerald-400" /> Member Payment Slip
-                    </span>
-                    {collectingTrx.receipt_photo_uploaded_at && (
-                      <span className="text-[11px] text-slate-400 font-mono">
-                        {collectingTrx.receipt_photo_uploaded_at}
-                      </span>
-                    )}
-                  </div>
+                              return (
+                                <div
+                                  key={mg.monthKey}
+                                  className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-2xs"
+                                >
+                                  {/* Period Subheader */}
+                                  <div
+                                    onClick={() => toggleExpandMonth(`${memberGroup.memberId}_${mg.monthKey}`)}
+                                    className="px-3.5 py-2.5 bg-slate-100/80 hover:bg-slate-100 cursor-pointer flex items-center justify-between text-xs border-b border-slate-200"
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-2 h-2 rounded-full bg-emerald-600" />
+                                      <span className="font-bold text-slate-800">{mg.monthLabel}</span>
+                                      {mg.campaignTrxNo && (
+                                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-white text-slate-600 border border-slate-200">
+                                          Campaign #{mg.campaignTrxNo}
+                                        </span>
+                                      )}
+                                    </div>
 
-                  <div className="py-3 my-auto w-full">
-                    <MagnifiableModalImage
-                      src={collectingTrx.receipt_photo}
-                      alt={`${collectingTrx.member?.name || 'Member'} Slip`}
-                      zoomScale={2.5}
-                      className="min-h-[420px] max-h-[560px]"
-                    />
-                  </div>
+                                    <div className="flex items-center gap-3 font-mono">
+                                      <span className="text-emerald-800 font-bold">Settled: BDT {mg.totalPaid.toLocaleString()}</span>
+                                      {mg.totalDue > 0 && (
+                                        <span className="text-amber-900 font-bold">Due: BDT {mg.totalDue.toLocaleString()}</span>
+                                      )}
+                                      <span className="text-slate-400 text-xs">
+                                        {isMonthExpanded ? <ChevronUp className="h-4 w-4 inline" /> : <ChevronDown className="h-4 w-4 inline" />}
+                                      </span>
+                                    </div>
+                                  </div>
 
-                  <div className="pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
-                    <span className="text-[11px] text-emerald-400/90 font-mono flex items-center gap-1">
-                      <ZoomIn className="h-3.5 w-3.5 text-emerald-400" /> Hover over image to magnify details
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => openRejectProofModal(collectingTrx)}
-                        className="h-7 text-[11px] border-red-800 bg-red-950/70 text-red-300 hover:bg-red-900 hover:text-red-100 cursor-pointer flex items-center gap-1"
-                      >
-                        <XCircle className="h-3.5 w-3.5 text-red-400" /> Reject Slip
-                      </Button>
-                      <a
-                        href={collectingTrx.receipt_photo}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-emerald-400 hover:text-emerald-300 font-bold hover:underline flex items-center gap-1 text-xs"
-                      >
-                        <Eye className="h-3.5 w-3.5" /> Full Image
-                      </a>
+                                  {/* Transactions Table for this Period */}
+                                  {isMonthExpanded && (
+                                    <Table className="table-fixed w-full">
+                                      <TableHeader className="bg-slate-50/60">
+                                        <TableRow className="text-[11px] font-bold text-slate-600">
+                                          <TableHead className="w-[14%] text-left py-2.5 px-3">DATE</TableHead>
+                                          <TableHead className="w-[26%] text-left py-2.5 px-2">PARTICULARS</TableHead>
+                                          <TableHead className="w-[20%] text-center py-2.5 px-2">TRX ID / REF</TableHead>
+                                          <TableHead className="w-[14%] text-center py-2.5 px-2">STATUS</TableHead>
+                                          <TableHead className="w-[13%] text-right py-2.5 px-2">ASSESSED</TableHead>
+                                          <TableHead className="w-[13%] text-right py-2.5 px-3">SETTLED</TableHead>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody>
+                                        {mg.items.map((it) => (
+                                          <TableRow key={it.id} className="text-xs hover:bg-slate-50/80">
+                                            <TableCell className="py-2.5 px-3 font-mono text-slate-600">
+                                              {it.date || '-'}
+                                            </TableCell>
+
+                                            <TableCell className="py-2.5 px-2">
+                                              <span className="font-medium text-slate-900">{it.monthOrDesc}</span>
+                                            </TableCell>
+
+                                            <TableCell className="py-2.5 px-2 text-center font-mono font-semibold text-slate-800">
+                                              <div>{it.transactionNo || '-'}</div>
+                                              {it.inputtedReference && it.inputtedReference !== '-' && it.inputtedReference !== it.transactionNo && (
+                                                <span className="inline-block mt-0.5 text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-50 text-amber-900 border border-amber-200">
+                                                  Ref: {it.inputtedReference}
+                                                </span>
+                                              )}
+                                            </TableCell>
+
+                                            <TableCell className="py-2.5 px-2 text-center">
+                                              {it.status === 'paid' ? (
+                                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                                  <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Settled
+                                                </span>
+                                              ) : it.status === 'partial' ? (
+                                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-800 border border-purple-200">
+                                                  <Wallet className="h-3 w-3 text-purple-600" /> Partial
+                                                </span>
+                                              ) : it.status === 'rejected' ? (
+                                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-red-50 text-red-800 border border-red-200">
+                                                  <XCircle className="h-3 w-3 text-red-600" /> Rejected
+                                                </span>
+                                              ) : (
+                                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                                                  <Clock className="h-3 w-3 text-amber-600" /> Due
+                                                </span>
+                                              )}
+                                            </TableCell>
+
+                                            <TableCell className="py-2.5 px-2 text-right font-mono font-semibold text-slate-800">
+                                              BDT {it.amount.toLocaleString()}
+                                            </TableCell>
+
+                                            <TableCell className="py-2.5 px-3 text-right font-mono font-bold text-emerald-800">
+                                              {it.status === 'paid' ? `BDT ${it.amount.toLocaleString()}` : (it.status === 'partial' && it.memberPaidAmount ? `BDT ${it.memberPaidAmount.toLocaleString()}` : '-')}
+                                            </TableCell>
+                                          </TableRow>
+                                        ))}
+                                      </TableBody>
+                                    </Table>
+                                  )}
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                </div>
+                  );
+                })
               )}
+            </div>
+          )}
 
-              <div className={collectingTrx.receipt_photo ? "lg:col-span-6 flex flex-col justify-between" : ""}>
-                <form onSubmit={onConfirmCollection} className="space-y-3.5">
-                  <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <div>
-                        <span className="text-slate-500 block">Member</span>
-                        <span className="font-bold text-slate-900 text-sm">{collectingTrx.member?.name ?? '-'}</span>
-                        {collectingTrx.member?.member_no && (
-                          <span className="text-[10px] font-mono text-emerald-800 ml-1.5 font-bold">
-                            (ID: {collectingTrx.member.member_no})
+          {/* =========================================================================
+              TAB 3: ALL RECORDS TABLE (FLAT CHRONOLOGICAL AUDIT LIST)
+              ========================================================================= */}
+          {activeTab === 'all' && (
+            <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
+              <Table className="table-fixed w-full">
+                <TableHeader className="bg-slate-50">
+                  <TableRow className="text-[11px] font-bold text-slate-700">
+                    <TableHead className="w-[12%] text-left py-3 px-3">DATE</TableHead>
+                    <TableHead className="w-[20%] text-left py-3 px-2">MEMBER &amp; FOLIO</TableHead>
+                    <TableHead className="w-[22%] text-left py-3 px-2">PARTICULARS / DESCRIPTION</TableHead>
+                    <TableHead className="w-[16%] text-center py-3 px-2">TRANSACTION ID / REF</TableHead>
+                    <TableHead className="w-[10%] text-center py-3 px-2">STATUS</TableHead>
+                    <TableHead className="w-[8%] text-center py-3 px-2">SLIP</TableHead>
+                    <TableHead className="w-[12%] text-right py-3 px-3">AMOUNT (BDT)</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {loadingTransactions ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center py-8 text-slate-400">
+                        Loading transaction ledger records...
+                      </TableCell>
+                    </TableRow>
+                  ) : filteredAllItems.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center py-12 text-slate-400">
+                        No transactions found matching your criteria.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredAllItems.map((item) => (
+                      <TableRow key={item.id} className="text-xs hover:bg-slate-50/80">
+                        <TableCell className="py-3 px-3 font-mono text-slate-600">
+                          {item.date || '-'}
+                        </TableCell>
+
+                        <TableCell className="py-3 px-2">
+                          <div className="font-bold text-slate-900">{item.memberName}</div>
+                          <div className="text-[11px] font-mono text-slate-500">FOLIO #{item.memberNo}</div>
+                        </TableCell>
+
+                        <TableCell className="py-3 px-2">
+                          <span className="font-medium text-slate-800">{item.monthOrDesc}</span>
+                        </TableCell>
+
+                        <TableCell className="py-3 px-2 text-center font-mono font-semibold text-slate-800">
+                          <div>{item.transactionNo || '-'}</div>
+                          {item.inputtedReference && item.inputtedReference !== '-' && item.inputtedReference !== item.transactionNo && (
+                            <span className="inline-block mt-0.5 text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-50 text-amber-900 border border-amber-200">
+                              Ref: {item.inputtedReference}
+                            </span>
+                          )}
+                        </TableCell>
+
+                        <TableCell className="py-3 px-2 text-center">
+                          {item.status === 'paid' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                              <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Settled
+                            </span>
+                          ) : item.status === 'partial' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-800 border border-purple-200">
+                              <Wallet className="h-3 w-3 text-purple-600" /> Partial
+                            </span>
+                          ) : item.status === 'rejected' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-red-50 text-red-800 border border-red-200">
+                              <XCircle className="h-3 w-3 text-red-600" /> Rejected
+                            </span>
+                          ) : item.receiptPhoto ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-200">
+                              <FileCheck className="h-3 w-3 text-blue-600" /> In Review
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                              <Clock className="h-3 w-3 text-amber-600" /> Due
+                            </span>
+                          )}
+                        </TableCell>
+
+                        <TableCell className="py-3 px-2 text-center">
+                          {item.receiptPhoto ? (
+                            <ReceiptSlipThumbnail
+                              photoUrl={item.receiptPhoto}
+                              title={`Slip for ${item.memberName}`}
+                              date={item.receiptPhotoUploadedAt || item.date}
+                              isRejected={item.isRejected}
+                              rejectionReason={item.rejectionReason}
+                              onClick={() =>
+                                openPhotoPreviewModal(
+                                  item.receiptPhoto!,
+                                  `Payment Slip: ${item.memberName} (${item.monthOrDesc})`,
+                                  item.receiptPhotoUploadedAt || item.date || '',
+                                  item.isRejected,
+                                  item.rejectionReason
+                                )
+                              }
+                            />
+                          ) : (
+                            <span className="text-[11px] text-slate-400 italic">-</span>
+                          )}
+                        </TableCell>
+
+                        <TableCell className="py-3 px-3 text-right font-mono font-bold">
+                          <span className={item.status === 'paid' ? 'text-emerald-800' : (item.status === 'partial' ? 'text-purple-800' : 'text-slate-800')}>
+                            BDT {item.amount.toLocaleString()}
                           </span>
-                        )}
-                      </div>
-
-                      <div className="text-right">
-                        <span className="text-slate-500 block">Total Due Amount</span>
-                        <span className="text-base font-bold text-slate-900 font-mono">
-                          BDT {origDue.toLocaleString()}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="text-[11px] text-slate-600 border-t border-slate-200/80 pt-1.5 flex justify-between">
-                      <span>Fee Item: <b>{collectingTrx.month || collectingTrx.description || collectingTrx.type}</b></span>
-                      <span className="font-mono text-slate-400">{collectingTrx.transaction_no}</span>
-                    </div>
-                  </div>
-
-                  {(collectingTrx.receipt_photo || collectingTrx.member_paid_amount || collectingTrx.member_trx_reference || collectingTrx.member_comment) && (
-                    <div className="p-3 bg-emerald-50/90 border border-emerald-300 rounded-xl space-y-1.5 text-xs shadow-2xs">
-                      <div className="flex items-center justify-between font-bold text-emerald-950">
-                        <span className="flex items-center gap-1.5">
-                          <CheckCircle2 className="h-4 w-4 text-emerald-700" />
-                          Member Proof Auto-Filled (Review & Confirm)
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px] text-emerald-900 pt-0.5">
-                        <div>Submitted Amount: <b>BDT {Number(collectingTrx.member_paid_amount || collectingTrx.amount).toLocaleString()}</b></div>
-                        <div>Transaction Type: <b className="capitalize">{collectingTrx.member_payment_method?.replace(/_/g, ' ') || 'Not specified'}</b></div>
-                        {collectingTrx.member_trx_reference && (
-                          <div className="sm:col-span-2 font-mono">Reference Code / TrxID: <b>{collectingTrx.member_trx_reference}</b></div>
-                        )}
-                        {collectingTrx.member_comment && (
-                          <div className="sm:col-span-2">Member Note: <i>&ldquo;{collectingTrx.member_comment}&rdquo;</i></div>
-                        )}
-                      </div>
-
-                      <p className="text-[10px] text-emerald-700 italic border-t border-emerald-200/80 pt-1">
-                        * The fields below have been auto-filled with these member details. You can edit and adjust any value before confirming settlement.
-                      </p>
-                    </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
                   )}
-
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <Label className="font-bold text-slate-900 text-xs flex items-center gap-1">
-                        <Calculator className="h-3.5 w-3.5 text-emerald-700" />
-                        Paid Amount (BDT Input Value)
-                      </Label>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setPaidAmountInput(String(origDue))}
-                          className="text-[11px] font-bold text-emerald-800 hover:underline cursor-pointer bg-emerald-50 px-2 py-0.5 rounded"
-                        >
-                          Pay Full (BDT {origDue})
-                        </button>
-                        {origDue >= 2 && (
-                          <button
-                            type="button"
-                            onClick={() => setPaidAmountInput(String(origDue / 2))}
-                            className="text-[11px] font-bold text-slate-700 hover:underline cursor-pointer bg-slate-100 px-2 py-0.5 rounded"
-                          >
-                            50% (BDT {origDue / 2})
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0.01"
-                      placeholder="Enter amount member is paying"
-                      value={paidAmountInput}
-                      onChange={(e) => setPaidAmountInput(e.target.value)}
-                      className="bg-white text-base font-bold font-mono text-slate-900 border-emerald-600 focus:ring-emerald-700"
-                      required
-                      autoFocus
-                    />
-                  </div>
-
-                  <div className={`p-3 rounded-xl border transition-all ${
-                    isFullSettlement
-                      ? 'bg-emerald-50 border-emerald-300'
-                      : 'bg-amber-50 border-amber-300'
-                  }`}>
-                    <div className="flex items-center justify-between text-xs font-bold">
-                      <span className="flex items-center gap-1.5">
-                        {isFullSettlement ? (
-                          <>
-                            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                            <span className="text-emerald-900">Payment Status: Full Payment</span>
-                          </>
-                        ) : (
-                          <>
-                            <Clock className="h-4 w-4 text-amber-600" />
-                            <span className="text-amber-950">Payment Status: Partial Payment</span>
-                          </>
-                        )}
-                      </span>
-
-                      <span className={`font-mono text-xs ${
-                        isFullSettlement ? 'text-emerald-800' : 'text-amber-900'
-                      }`}>
-                        {isFullSettlement ? 'BDT 0.00 Remaining Due' : `BDT ${computedRemainingDue.toLocaleString()} Remaining Due`}
-                      </span>
-                    </div>
-
-                    {!isFullSettlement && computedRemainingDue > 0 && (
-                      <p className="text-[11px] text-amber-800 mt-1">
-                        A new pending due transaction of <b>BDT {computedRemainingDue.toLocaleString()}</b> will remain on the member&rsquo;s account until cleared.
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <Label className="text-xs font-bold text-slate-900">Payment Method</Label>
-                      <select
-                        className="w-full border border-slate-300 rounded-md p-2 bg-white text-xs mt-1 font-medium cursor-pointer"
-                        value={paymentMethod}
-                        onChange={(e: any) => setPaymentMethod(e.target.value)}
-                      >
-                        <option value="cash">Cash in Hand</option>
-                        <option value="mobile_banking">Mobile Banking (bKash / Nagad / Rocket)</option>
-                        <option value="bank">Bank Transfer / Deposit</option>
-                        <option value="other">Other Method</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <Label className="text-xs font-bold text-slate-900">Payment Date</Label>
-                      <Input
-                        type="date"
-                        value={paymentDate}
-                        onChange={(e) => setPaymentDate(e.target.value)}
-                        className="bg-white mt-1 text-xs"
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <Label className="text-xs text-slate-600">Payment Notes / Reference (Optional)</Label>
-                    <Input
-                      placeholder="e.g. bKash TrxID: 9X29A..., Received at monthly meeting"
-                      value={paymentNotes}
-                      onChange={(e) => setPaymentNotes(e.target.value)}
-                      className="bg-white mt-1 text-xs"
-                    />
-                  </div>
-
-                  <label className="flex items-center gap-2 cursor-pointer select-none bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-                    <input
-                      type="checkbox"
-                      checked={createReceipt}
-                      onChange={(e) => setCreateReceipt(e.target.checked)}
-                      className="rounded text-emerald-700 focus:ring-emerald-700"
-                    />
-                    <span className="text-xs font-semibold text-slate-800 flex items-center gap-1">
-                      <ReceiptIcon className="h-3.5 w-3.5 text-emerald-700" />
-                      Generate Official Printable Receipt for BDT {numInputPaid.toLocaleString()}
-                    </span>
-                  </label>
-
-                  <DialogFooter className="pt-2 flex items-center justify-between flex-wrap gap-2">
-                    {collectingTrx.receipt_photo && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => openRejectProofModal(collectingTrx)}
-                        className="cursor-pointer text-red-700 border-red-300 hover:bg-red-50 hover:text-red-800 flex items-center gap-1.5 text-xs mr-auto"
-                      >
-                        <XCircle className="h-4 w-4 text-red-600" /> Reject Proof Slip
-                      </Button>
-                    )}
-                    <div className="flex items-center gap-2 ml-auto">
-                      <Button type="button" variant="outline" onClick={() => setOpenCollect(false)} className="cursor-pointer text-xs">
-                        Cancel
-                      </Button>
-                      <Button
-                        type="submit"
-                        disabled={isCollecting}
-                        className="cursor-pointer bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs"
-                      >
-                        {isCollecting ? 'Processing...' : `Confirm & Settle (BDT ${numInputPaid.toLocaleString()})`}
-                      </Button>
-                    </div>
-                  </DialogFooter>
-                </form>
-              </div>
+                </TableBody>
+              </Table>
             </div>
           )}
-        </DialogContent>
-      </Dialog>
+        </div>
+      </div>
 
-      {/* DIALOG: REJECT PAYMENT PROOF SLIP */}
-      <Dialog open={openRejectModal} onOpenChange={setOpenRejectModal}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-red-700 text-lg">
-              <Ban className="h-5 w-5 text-red-600" />
-              Reject Payment Proof Slip
-            </DialogTitle>
-          </DialogHeader>
-
-          {rejectingTrx && (
-            <form onSubmit={onConfirmRejectProof} className="space-y-4 pt-1">
-              <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl space-y-2 text-xs text-red-900">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-sm text-red-950">
-                    Member: {rejectingTrx.member?.name || 'Member'}
-                  </span>
-                  {rejectingTrx.member?.member_no && (
-                    <span className="font-mono text-[10px] bg-red-100 text-red-800 px-2 py-0.5 rounded font-bold">
-                      ID: {rejectingTrx.member.member_no}
-                    </span>
-                  )}
-                </div>
-
-                <div className="text-[11px] text-red-800 border-t border-red-200/80 pt-1.5 flex justify-between">
-                  <span>Fee Item: <b>{rejectingTrx.month || rejectingTrx.description || rejectingTrx.transaction_no}</b></span>
-                  <span className="font-mono font-bold">Due: BDT {Number(rejectingTrx.amount).toLocaleString()}</span>
-                </div>
-
-                <div className="text-[10px] text-red-700 pt-1 border-t border-red-200/80 flex items-start gap-1">
-                  <AlertCircle className="h-3.5 w-3.5 text-red-600 shrink-0 mt-0.5" />
-                  <span>
-                    This row will be preserved as <b>Rejected</b>. A <b>new pending row</b> will be automatically created so the member can upload a valid proof.
-                  </span>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-xs font-bold text-slate-700">Quick Select Reason</Label>
-                <div className="flex flex-wrap gap-1.5">
-                  {[
-                    'Transaction ID not found in bank statement',
-                    'Receipt slip image is blurry or unreadable',
-                    'Amount mismatch between slip and bank record',
-                    'Duplicate slip already used for another payment',
-                    'Transferred to incorrect bank account',
-                  ].map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => setRejectionReason(preset)}
-                      className={`text-[11px] px-2.5 py-1 rounded-full border transition-all cursor-pointer text-left ${
-                        rejectionReason === preset
-                          ? 'bg-red-600 text-white border-red-600 font-semibold shadow-xs'
-                          : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
-                      }`}
-                    >
-                      {preset}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <Label className="text-xs font-bold text-slate-900 flex items-center justify-between">
-                  <span>Rejection Reason (Directly Delivered to Member)</span>
-                  <span className="text-[10px] text-slate-400 font-normal">Editable</span>
-                </Label>
-                <textarea
-                  className="w-full border border-slate-300 rounded-lg p-2.5 bg-white text-xs mt-1.5 focus:ring-red-500 focus:border-red-500 min-h-[85px] leading-relaxed"
-                  placeholder="Explain why this proof slip was rejected so the member understands what to fix..."
-                  value={rejectionReason}
-                  onChange={(e) => setRejectionReason(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="p-3 bg-red-100/90 border border-red-300 rounded-xl text-red-950 text-xs flex items-start gap-2.5 shadow-2xs">
-                <AlertCircle className="h-4 w-4 text-red-700 shrink-0 mt-0.5" />
-                <div className="space-y-0.5">
-                  <p className="font-bold text-xs text-red-950">Confirmation: Are you sure you want to reject this slip?</p>
-                  <p className="text-[11px] text-red-900 leading-normal">
-                    This slip will turn <b>Red (Rejected)</b>. The member will receive an instant alert with your rejection reason, and a <b>new pending due ({rejectingTrx.amount ? `BDT ${Number(rejectingTrx.amount).toLocaleString()}` : ''})</b> will be generated for them to re-submit.
-                  </p>
-                </div>
-              </div>
-
-              <DialogFooter className="pt-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setOpenRejectModal(false)}
-                  className="cursor-pointer text-xs"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={isRejectingProof}
-                  className="cursor-pointer bg-red-600 hover:bg-red-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm"
-                >
-                  {isRejectingProof ? 'Processing...' : 'Yes, Confirm Rejection & Notify Member'}
-                </Button>
-              </DialogFooter>
-            </form>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* DIALOG 1: CREATE / ASSIGN PAYMENT DEMAND */}
-      <Dialog open={openDemand} onOpenChange={setOpenDemand}>
-        <DialogContent className="max-w-xl max-h-[92vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-slate-900">
-              <CalendarCheck className="h-5 w-5 text-emerald-700" />
-              Create & Assign Payment Dues
-            </DialogTitle>
-          </DialogHeader>
-
-          <form onSubmit={onSubmitDemand} className="space-y-4 pt-2">
-            <div className="grid grid-cols-2 gap-3 p-1.5 bg-slate-100 rounded-lg">
-              <button
-                type="button"
-                onClick={() => setDemandCategory('monthly_payment')}
-                className={`py-2 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                  demandCategory === 'monthly_payment'
-                    ? 'bg-white text-emerald-800 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <CalendarIcon className="h-3.5 w-3.5 text-emerald-700" />
-                Monthly Payment
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setDemandCategory('one_time')}
-                className={`py-2 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                  demandCategory === 'one_time'
-                    ? 'bg-white text-emerald-800 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <CreditCard className="h-3.5 w-3.5 text-emerald-700" />
-                One-Time Payment
-              </button>
-            </div>
-
-            <div className="space-y-2 p-3.5 bg-slate-50 border border-slate-200 rounded-lg">
-              <Label className="font-bold text-slate-900 text-xs">Assign To Which Member(s)?</Label>
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    type="radio"
-                    name="target_group"
-                    checked={targetAllMembers}
-                    onChange={() => {
-                      setTargetAllMembers(true);
-                      setSelectedMemberId('');
-                    }}
-                    className="text-emerald-700 focus:ring-emerald-700"
-                  />
-                  <span className="text-xs font-semibold text-slate-900">
-                    All Active Members ({membersList.length} members)
-                  </span>
-                </label>
-
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    type="radio"
-                    name="target_group"
-                    checked={!targetAllMembers}
-                    onChange={() => setTargetAllMembers(false)}
-                    className="text-emerald-700 focus:ring-emerald-700"
-                  />
-                  <span className="text-xs font-semibold text-slate-900">Specific Single Member</span>
-                </label>
-
-                {!targetAllMembers && (
-                  <select
-                    className="w-full border border-slate-300 rounded-md p-2 bg-white text-xs mt-2"
-                    value={selectedMemberId}
-                    onChange={(e) => setSelectedMemberId(e.target.value)}
-                    required={!targetAllMembers}
-                  >
-                    <option value="">-- Choose a member --</option>
-                    {membersList.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.name} (ID: {m.member_profile?.member_no || 'Unassigned'})
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-            </div>
-
-            {demandCategory === 'monthly_payment' && (
-              <div className="space-y-2.5 p-3.5 bg-slate-50 border border-slate-200 rounded-lg">
-                <div className="flex items-center justify-between">
-                  <Label className="font-bold text-slate-900 text-xs">Select Month(s) for Subscription</Label>
-                  <div className="flex items-center gap-2">
-                    <select
-                      className="border border-slate-300 rounded px-2 py-0.5 text-xs bg-white font-semibold"
-                      value={demandYear}
-                      onChange={(e) => {
-                        const newYr = Number(e.target.value);
-                        setDemandYear(newYr);
-                        setSelectedMonths([`${MONTH_NAMES[new Date().getMonth()]} ${newYr}`]);
-                      }}
-                    >
-                      {[2024, 2025, 2026, 2027, 2028].map((y) => (
-                        <option key={y} value={y}>{y}</option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      onClick={handleSelectAllMonths}
-                      className="text-[11px] text-emerald-800 font-bold hover:underline cursor-pointer"
-                    >
-                      All 12 Months
-                    </button>
-                    <span className="text-slate-300">•</span>
-                    <button
-                      type="button"
-                      onClick={handleClearMonths}
-                      className="text-[11px] text-rose-700 font-bold hover:underline cursor-pointer"
-                    >
-                      Clear
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 pt-1">
-                  {MONTH_NAMES.map((m) => {
-                    const monthKey = `${m} ${demandYear}`;
-                    const isSelected = selectedMonths.includes(monthKey);
-
-                    return (
-                      <button
-                        key={m}
-                        type="button"
-                        onClick={() => handleToggleMonth(monthKey)}
-                        className={`p-2 text-xs font-semibold rounded-md border text-center transition-all cursor-pointer ${
-                          isSelected
-                            ? 'bg-emerald-700 text-white border-emerald-800 shadow-xs'
-                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-                        }`}
-                      >
-                        {m}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <p className="text-[11px] text-emerald-800">
-                  A separate pending payment transaction of <b>BDT {demandAmount}</b> will be generated for each selected month per member.
-                </p>
-              </div>
-            )}
-
-            {demandCategory === 'one_time' && (
-              <div className="space-y-1.5 p-3.5 bg-slate-50 border border-slate-200 rounded-lg">
-                <Label className="font-bold text-slate-900 text-xs">Payment Title / Purpose</Label>
-                <Input
-                  placeholder="e.g. Annual General Meeting Fee, Special Welfare Fund"
-                  value={oneTimeTitle}
-                  onChange={(e) => setOneTimeTitle(e.target.value)}
-                  className="bg-white text-sm"
-                  required
-                />
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <Label className="font-bold text-slate-900 text-xs">
-                  {demandCategory === 'monthly_payment' ? 'Amount per Month (BDT)' : 'Total Amount (BDT)'}
-                </Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0.01"
-                  placeholder="2000"
-                  value={demandAmount}
-                  onChange={(e) => setDemandAmount(e.target.value)}
-                  className="bg-white mt-1 text-sm font-bold"
-                  required
-                />
-              </div>
-
-              <div>
-                <Label className="font-bold text-slate-900 text-xs">Due Date</Label>
-                <Input
-                  type="date"
-                  value={demandDueDate}
-                  onChange={(e) => setDemandDueDate(e.target.value)}
-                  className="bg-white mt-1 text-sm"
-                  required
-                />
-              </div>
-            </div>
-
-            <div>
-              <Label className="text-xs text-slate-600">Additional Instructions / Notes (Optional)</Label>
-              <Input
-                placeholder="e.g. Please pay before the monthly society meeting."
-                value={demandDescription}
-                onChange={(e) => setDemandDescription(e.target.value)}
-                className="bg-white mt-1 text-sm"
-              />
-            </div>
-
-            <DialogFooter className="pt-2">
-              <Button type="button" variant="outline" onClick={() => setOpenDemand(false)} className="cursor-pointer">
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={isGenerating}
-                className="cursor-pointer bg-emerald-700 hover:bg-emerald-800"
-              >
-                {isGenerating ? 'Generating...' : 'Assign & Send Pending Dues'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* DIALOG 2: MANUAL RECORD TRANSACTION */}
-      <Dialog open={openSingle} onOpenChange={setOpenSingle}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Record Manual Transaction</DialogTitle>
-          </DialogHeader>
-          <form onSubmit={handleSubmit(onSubmitSingle)} className="space-y-3 pt-2">
-            <div>
-              <Label>Member</Label>
-              <select className="w-full border border-slate-200 rounded-md p-2 bg-white text-sm mt-1" {...register('member_id')}>
-                <option value="">Select member</option>
-                {membersList.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name} (ID: {u.member_profile?.member_no || 'No ID'})
-                  </option>
-                ))}
-              </select>
-              {errors.member_id && <p className="text-xs text-red-600 mt-1">{String(errors.member_id.message)}</p>}
-            </div>
-
-            <div>
-              <Label>Type</Label>
-              <select className="w-full border border-slate-200 rounded-md p-2 bg-white text-sm mt-1" {...register('type')}>
-                {['payment', 'share', 'fdr', 'expense', 'other'].map((t) => (
-                  <option key={t} value={t} className="capitalize">{t}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <Label>Amount (BDT)</Label>
-              <Input type="number" step="0.01" placeholder="0.00" {...register('amount')} className="bg-white mt-1" />
-              {errors.amount && <p className="text-xs text-red-600 mt-1">{String(errors.amount.message)}</p>}
-            </div>
-
-            <div>
-              <Label>Transaction Date</Label>
-              <Input type="date" {...register('transaction_date')} className="bg-white mt-1" />
-              {errors.transaction_date && <p className="text-xs text-red-600 mt-1">{String(errors.transaction_date.message)}</p>}
-            </div>
-
-            <div>
-              <Label>Description</Label>
-              <Input placeholder="Optional notes / transaction details" {...register('description')} className="bg-white mt-1" />
-            </div>
-
-            <DialogFooter className="pt-2">
-              <Button type="button" variant="outline" onClick={() => setOpenSingle(false)} className="cursor-pointer">
-                Cancel
-              </Button>
-              <Button type="submit" disabled={isCreatingSingle} className="cursor-pointer bg-emerald-700 hover:bg-emerald-800">
-                {isCreatingSingle ? 'Saving...' : 'Save Transaction'}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Lightbox Dialog with 2.5x Magnifier Lens */}
+      {/* Lightbox Receipt Photo Modal */}
       <Dialog open={openPhotoModal} onOpenChange={setOpenPhotoModal}>
         <DialogContent className={`max-w-2xl max-h-[92vh] overflow-y-auto ${
           photoModalIsRejected ? 'border-red-500/60 shadow-2xl' : ''
@@ -2811,12 +1628,12 @@ export default function AdminTransactionsPage() {
               {photoModalIsRejected ? (
                 <>
                   <XCircle className="h-5 w-5 text-red-600 shrink-0" />
-                  <span className="text-red-950 font-bold">{photoModalTitle || 'Member Payment Slip'} (Rejected)</span>
+                  <span className="text-red-950 font-bold">{photoModalTitle || 'Payment Slip'} (Rejected)</span>
                 </>
               ) : (
                 <>
-                  <ImageIcon className="h-5 w-5 text-emerald-700 shrink-0" />
-                  <span>{photoModalTitle || 'Member Payment Slip / Receipt Photo'}</span>
+                  <FileImage className="h-5 w-5 text-emerald-700 shrink-0" />
+                  <span>{photoModalTitle || 'Payment Slip / Receipt Photo'}</span>
                 </>
               )}
             </DialogTitle>
@@ -2836,7 +1653,7 @@ export default function AdminTransactionsPage() {
                   </p>
                 </div>
                 <p className="text-[10px] text-red-700 italic pt-0.5">
-                  * This slip is archived as Rejected. A new pending due row has been generated for the member.
+                  * This slip is preserved as rejected for member and administrative audit.
                 </p>
               </div>
             )}
@@ -2857,14 +1674,18 @@ export default function AdminTransactionsPage() {
                   photoModalIsRejected ? 'text-red-700' : 'text-emerald-700'
                 }`}
               >
-                <Eye className="h-3.5 w-3.5" /> Open Full Image in New Tab
+                <ExternalLink className="h-3.5 w-3.5" /> Open Full Image in New Tab
               </a>
             </div>
 
             <DialogFooter className="pt-2">
-              <Button type="button" onClick={() => setOpenPhotoModal(false)} className={`cursor-pointer text-white ${
-                photoModalIsRejected ? 'bg-red-700 hover:bg-red-800' : 'bg-slate-900 hover:bg-slate-800'
-              }`}>
+              <Button
+                type="button"
+                onClick={() => setOpenPhotoModal(false)}
+                className={`cursor-pointer text-white text-xs ${
+                  photoModalIsRejected ? 'bg-red-700 hover:bg-red-800' : 'bg-slate-900 hover:bg-slate-800'
+                }`}
+              >
                 Close Viewer
               </Button>
             </DialogFooter>
@@ -2872,10 +1693,13 @@ export default function AdminTransactionsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Hidden print container for official society receipt */}
+      {/* Single Receipt Print Area */}
       {printReceipt && (
         <ReceiptPrintArea receipt={printReceipt} />
       )}
-    </div>
+
+      {/* Official Audited Financial Report Print Area */}
+      <ReportPrintArea report={printingReport} />
+    </>
   );
 }

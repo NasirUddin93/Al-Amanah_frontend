@@ -19,6 +19,7 @@ import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { ReceiptPrintArea } from '@/components/receipt-print';
+import { ReportPrintArea, type PrintingReportData, type PrintSection, type PrintMonthSection } from '@/components/report-print';
 import { ReceiptSlipThumbnail, MagnifiableModalImage } from '@/components/receipt-magnifier';
 import type { Receipt, User, Transaction } from '@/types';
 import {
@@ -62,6 +63,7 @@ export default function MemberDashboardPage() {
   const user = useAppSelector((s) => s.auth.user);
   const [activeTab, setActiveTab] = useState<'receipts' | 'transactions' | 'fdrs' | 'notifs' | 'profile'>('transactions');
   const [printReceipt, setPrintReceipt] = useState<Receipt | null>(null);
+  const [printingReport, setPrintingReport] = useState<PrintingReportData | null>(null);
 
   const { data: trx, isLoading: loadingTrx } = useGetTransactionsQuery(undefined, { pollingInterval: 3000 });
   const { data: receipts, isLoading: loadingReceipts } = useGetReceiptsQuery(undefined, { pollingInterval: 3000 });
@@ -249,6 +251,157 @@ export default function MemberDashboardPage() {
   const pendingTransactions = trx?.data.filter((t) => t.status === 'pending') ?? [];
   const pendingAmount = pendingTransactions.reduce((acc, t) => acc + Number(t.amount || 0), 0);
 
+  // Month grouping helper
+  const MONTH_MAP: Record<string, { num: string; name: string }> = {
+    january: { num: '01', name: 'January' },
+    february: { num: '02', name: 'February' },
+    march: { num: '03', name: 'March' },
+    april: { num: '04', name: 'April' },
+    may: { num: '05', name: 'May' },
+    june: { num: '06', name: 'June' },
+    july: { num: '07', name: 'July' },
+    august: { num: '08', name: 'August' },
+    september: { num: '09', name: 'September' },
+    october: { num: '10', name: 'October' },
+    november: { num: '11', name: 'November' },
+    december: { num: '12', name: 'December' },
+  };
+
+  const parseMonthGrouping = (descOrMonth: string, fallbackDate: string = '') => {
+    const match = (descOrMonth || '').match(
+      /(January|February|March|April|May|June|July|August|September|October|November|December)\s*(\d{4})?/i
+    );
+
+    if (match) {
+      const rawMonthName = match[1].toLowerCase();
+      const entry = MONTH_MAP[rawMonthName] || { num: '01', name: match[1] };
+      let yearNum = match[2];
+      if (!yearNum && fallbackDate && fallbackDate.length >= 4) {
+        yearNum = fallbackDate.slice(0, 4);
+      }
+      if (!yearNum) yearNum = '2026';
+      return {
+        key: `${yearNum}-${entry.num}`,
+        label: `[${yearNum}-${entry.num}] ${entry.name} ${yearNum}`,
+      };
+    }
+
+    if (fallbackDate && fallbackDate.length >= 7) {
+      const yyyymm = fallbackDate.slice(0, 7);
+      return {
+        key: yyyymm,
+        label: `[${yyyymm}] Billing Period (${yyyymm})`,
+      };
+    }
+
+    return {
+      key: '9999-OTHER',
+      label: descOrMonth || 'General Society Assessment',
+    };
+  };
+
+  // Member Official Statement Printing Handler
+  const handlePrintMemberStatement = () => {
+    const rawList = trx?.data || [];
+    const monthMap: Record<string, {
+      monthKey: string;
+      monthLabel: string;
+      campaignTrxNo?: string;
+      items: Transaction[];
+      totalPaid: number;
+      totalDue: number;
+    }> = {};
+
+    rawList.forEach((t) => {
+      const parsed = parseMonthGrouping(t.month || t.description || '', t.transaction_date || (t.created_at || ''));
+      const k = parsed.key;
+      if (!monthMap[k]) {
+        monthMap[k] = {
+          monthKey: k,
+          monthLabel: parsed.label,
+          campaignTrxNo: t.transaction_no?.startsWith('TRX-') ? t.transaction_no : undefined,
+          items: [],
+          totalPaid: 0,
+          totalDue: 0,
+        };
+      }
+      monthMap[k].items.push(t);
+      if (t.status === 'paid') {
+        monthMap[k].totalPaid += Number(t.amount || 0);
+      } else if (t.status !== 'rejected') {
+        monthMap[k].totalDue += Number(t.amount || 0);
+      }
+    });
+
+    const monthSections: PrintMonthSection[] = Object.values(monthMap)
+      .sort((a, b) => b.monthKey.localeCompare(a.monthKey))
+      .map((mg) => ({
+        monthTitle: mg.monthLabel,
+        campaignTrxNo: mg.campaignTrxNo,
+        subTotalPaid: mg.totalPaid,
+        subTotalDue: mg.totalDue,
+        subTotalAssessed: mg.totalPaid + mg.totalDue,
+        rows: mg.items.map((t, idx) => {
+          const isPaid = t.status === 'paid';
+          const isRejected = t.status === 'rejected';
+          const isPartial = (t as any).is_partial || (t.description || '').toLowerCase().includes('partial');
+          const paidAmt = isPaid ? Number(t.amount || 0) : (isPartial && t.member_paid_amount ? Number(t.member_paid_amount) : 0);
+          const dueAmt = !isPaid && !isRejected ? Number(t.amount || 0) : 0;
+          const assessedAmt = Number(t.amount || 0);
+
+          return {
+            serial: idx + 1,
+            date: t.transaction_date || (t.created_at || '').slice(0, 10),
+            description: t.description || t.month || 'Subscription Demand',
+            transactionNo: t.transaction_no || '-',
+            refNo: t.member_trx_reference || (t as any).transaction_reference || (t as any).reference || '-',
+            status: isPaid ? 'Settled' : (isPartial ? 'Partial' : (isRejected ? 'Rejected' : (t.receipt_photo ? 'In Review' : 'Due'))),
+            assessedAmount: assessedAmt,
+            paidAmount: paidAmt,
+            dueAmount: dueAmt,
+            balanceAmount: dueAmt,
+          };
+        }),
+      }));
+
+    const memberSection: PrintSection = {
+      memberId: user?.id,
+      memberName: user?.name || 'Member',
+      memberNo: user?.member_profile?.member_no || (user as any)?.memberProfile?.member_no || 'MEM',
+      memberRole: (user?.member_profile as any)?.role_designation || 'Active Member',
+      memberHeader: user?.name || 'Member Statement',
+      memberSubHeader: `FOLIO #${user?.member_profile?.member_no || (user as any)?.memberProfile?.member_no || 'MEM'} • Phone: ${user?.member_profile?.phone || '-'} • Email: ${user?.email || '-'}`,
+      monthSections,
+      memberTotalPaid: totalPaid,
+      memberTotalDue: pendingAmount,
+      memberTotalAssessed: totalPaid + pendingAmount,
+    };
+
+    const reportData: PrintingReportData = {
+      level: 2,
+      title: `Official Member Statement — ${user?.name || 'Member'}`,
+      subtitle: `Folio #${user?.member_profile?.member_no || (user as any)?.memberProfile?.member_no || 'MEM'} • Individual Financial Statement`,
+      date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+      sections: [memberSection],
+      grandTotalPaid: totalPaid,
+      grandTotalDue: pendingAmount,
+      totalRecords: rawList.length,
+      summaryStats: {
+        totalDemand: totalPaid + pendingAmount,
+        totalPaid,
+        totalDue: pendingAmount,
+        recoveryRate: (totalPaid + pendingAmount) > 0 ? Math.round((totalPaid / (totalPaid + pendingAmount)) * 100) : 100,
+        totalMembers: 1,
+        totalRecords: rawList.length,
+      },
+    };
+
+    setPrintingReport(reportData);
+    setTimeout(() => {
+      window.print();
+    }, 150);
+  };
+
   // Set of pending months to detect partial payments
   const pendingMonthsSet = useMemo(() => {
     const s = new Set<string>();
@@ -372,7 +525,7 @@ export default function MemberDashboardPage() {
 
   return (
     <>
-      <div className={printReceipt ? 'space-y-6 print:hidden' : 'space-y-6'}>
+      <div className={printReceipt || printingReport ? 'space-y-6 print:hidden' : 'space-y-6'}>
         {/* Member Profile Hero Banner */}
         <div className="bg-gradient-to-r from-emerald-800 via-emerald-700 to-teal-800 rounded-2xl p-6 text-white shadow-md relative overflow-hidden">
           <div className="absolute right-0 top-0 -mt-8 -mr-8 w-48 h-48 rounded-full bg-white/5 pointer-events-none" />
@@ -411,10 +564,20 @@ export default function MemberDashboardPage() {
               </div>
             </div>
 
-            <div className="bg-white/10 border border-white/20 rounded-xl p-3.5 backdrop-blur-xs min-w-[200px] text-right md:text-right">
-              <div className="text-[11px] font-medium text-emerald-200 uppercase tracking-wider">Share Capital</div>
-              <div className="text-2xl font-bold text-white mt-0.5">
-                BDT {Number(user?.member_profile?.share_amount || 0).toLocaleString()}
+            <div className="flex items-center gap-3 flex-wrap md:flex-nowrap">
+              <Button
+                onClick={handlePrintMemberStatement}
+                className="bg-white hover:bg-emerald-50 text-emerald-950 font-bold px-4 py-2.5 text-xs sm:text-sm rounded-xl shadow-md flex items-center gap-2 cursor-pointer transition-all hover:scale-[1.02] shrink-0"
+              >
+                <Printer className="h-4 w-4 text-emerald-700" />
+                Print Statement
+              </Button>
+
+              <div className="bg-white/10 border border-white/20 rounded-xl p-3.5 backdrop-blur-xs min-w-[170px] text-right">
+                <div className="text-[11px] font-medium text-emerald-200 uppercase tracking-wider">Share Capital</div>
+                <div className="text-2xl font-bold text-white mt-0.5">
+                  BDT {Number(user?.member_profile?.share_amount || 0).toLocaleString()}
+                </div>
               </div>
             </div>
           </div>
@@ -587,29 +750,40 @@ export default function MemberDashboardPage() {
                   <CardTitle className="text-base font-bold text-slate-900">Transaction History &amp; Assigned Dues</CardTitle>
                   <p className="text-xs text-slate-500">View your monthly subscriptions, assigned payment dues, and upload proof of payment slips.</p>
                 </div>
-                <div className="flex items-center bg-slate-100 p-1 rounded-lg">
-                  <button
-                    onClick={() => setTrxSubView('created')}
-                    className={`px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
-                      trxSubView === 'created'
-                        ? 'bg-white text-emerald-900 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center bg-slate-100 p-1 rounded-lg">
+                    <button
+                      onClick={() => setTrxSubView('created')}
+                      className={`px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
+                        trxSubView === 'created'
+                          ? 'bg-white text-emerald-900 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <ReceiptIcon className="h-3 w-3 text-emerald-700" />
+                      Demand Batches ({createdDemandGroups.length})
+                    </button>
+                    <button
+                      onClick={() => setTrxSubView('all')}
+                      className={`px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
+                        trxSubView === 'all'
+                          ? 'bg-white text-emerald-900 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <FileText className="h-3 w-3 text-emerald-700" />
+                      All Transactions ({trx?.data?.length || 0})
+                    </button>
+                  </div>
+
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handlePrintMemberStatement}
+                    className="h-8 gap-1.5 border-emerald-300 text-emerald-800 hover:bg-emerald-50 text-xs font-bold cursor-pointer"
                   >
-                    <ReceiptIcon className="h-3 w-3 text-emerald-700" />
-                    Demand Batches ({createdDemandGroups.length})
-                  </button>
-                  <button
-                    onClick={() => setTrxSubView('all')}
-                    className={`px-3 py-1 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center gap-1.5 ${
-                      trxSubView === 'all'
-                        ? 'bg-white text-emerald-900 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <FileText className="h-3 w-3 text-emerald-700" />
-                    All Transactions ({trx?.data?.length || 0})
-                  </button>
+                    <Printer className="h-3.5 w-3.5" /> Print Statement
+                  </Button>
                 </div>
               </CardHeader>
 
@@ -1679,6 +1853,9 @@ export default function MemberDashboardPage() {
 
       {/* Hidden print area for 1-click receipt printing */}
       {printReceipt && <ReceiptPrintArea receipt={printReceipt} />}
+
+      {/* Official Member Statement Print Area */}
+      <ReportPrintArea report={printingReport} />
     </>
   );
 }

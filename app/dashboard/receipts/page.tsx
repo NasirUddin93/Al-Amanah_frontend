@@ -112,6 +112,7 @@ export default function ReceiptsPage() {
   const [paidAmountInput, setPaidAmountInput] = useState<string>('');
   const [paymentMethodInput, setPaymentMethodInput] = useState<'cash' | 'bank' | 'mobile_banking' | 'other'>('cash');
   const [paymentDateInput, setPaymentDateInput] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [paymentTrxRefInput, setPaymentTrxRefInput] = useState<string>('');
   const [paymentNotesInput, setPaymentNotesInput] = useState<string>('');
 
   // Reject Proof Slip Modal State
@@ -571,6 +572,8 @@ export default function ReceiptsPage() {
 
   const createdDemandGroups = useMemo(() => {
     const groups: Record<string, {
+      id?: number | string;
+      transaction_no?: string;
       key: string;
       title: string;
       category: string;
@@ -606,6 +609,8 @@ export default function ReceiptsPage() {
         }
 
         groups[groupKey] = {
+          id: t.id,
+          transaction_no: t.transaction_no,
           key: groupKey,
           title,
           category: t.payment_category || t.type,
@@ -678,12 +683,32 @@ export default function ReceiptsPage() {
         : (totalCollectedAmount > 0 ? 100 : 0);
       const isFullyPaid = pendingMembersCount === 0 && totalMembersAssigned > 0;
 
+      // Calculate 5-status count breakdown for each demand group
+      let duePendingCount = 0;
+      let receivedSlipCount = 0;
+      let rejectedCount = 0;
+
+      Object.entries(memberStatusMap).forEach(([mId, st]) => {
+        if (st.hasPaid && !st.hasPending) {
+          return;
+        }
+        const mTrxList = g.transactions.filter((t) => (String(t.member?.id) === String(mId) || String((t as any).member_id) === String(mId)));
+        const hasSlip = mTrxList.some((t) => t.status === 'pending' && !!t.receipt_photo);
+        const isRej = mTrxList.some((t) => t.status === 'rejected');
+        if (hasSlip) receivedSlipCount += 1;
+        else if (isRej) rejectedCount += 1;
+        else duePendingCount += 1;
+      });
+
       return {
         ...g,
         totalMembersAssigned,
         paidCount: fullyPaidMembersCount,
         partiallyPaidCount: partiallyPaidMembersCount,
         pendingCount: pendingMembersCount,
+        duePendingCount,
+        receivedSlipCount,
+        rejectedCount,
         totalDemandAmount,
         totalCollectedAmount,
         progressPercent,
@@ -784,11 +809,8 @@ export default function ReceiptsPage() {
     setPaidAmountInput(defaultAmount);
     setPaymentMethodInput((trx.member_payment_method as any) || 'cash');
     setPaymentDateInput(new Date().toISOString().split('T')[0]);
-
-    const noteParts: string[] = [];
-    if (trx.member_trx_reference) noteParts.push(`Ref: ${trx.member_trx_reference}`);
-    if (trx.member_comment) noteParts.push(`Note: ${trx.member_comment}`);
-    setPaymentNotesInput(noteParts.join(' | '));
+    setPaymentTrxRefInput(trx.member_trx_reference || '');
+    setPaymentNotesInput(trx.member_comment || '');
     setOpenCollectModal(true);
   };
 
@@ -809,13 +831,19 @@ export default function ReceiptsPage() {
     if (!confirmed) return;
 
     try {
+      const combinedNotes: string[] = [];
+      if (paymentTrxRefInput.trim()) combinedNotes.push(`Ref: ${paymentTrxRefInput.trim()}`);
+      if (paymentNotesInput.trim()) combinedNotes.push(`Note: ${paymentNotesInput.trim()}`);
+
       const res = await collectPayment({
         id: collectingTrx.id,
         body: {
           paid_amount: numAmount,
           payment_method: paymentMethodInput,
           payment_date: paymentDateInput,
-          notes: paymentNotesInput || undefined,
+          trx_reference: paymentTrxRefInput.trim() || undefined,
+          reference: paymentTrxRefInput.trim() || undefined,
+          notes: combinedNotes.length > 0 ? combinedNotes.join(' | ') : (paymentNotesInput.trim() || undefined),
         },
       }).unwrap();
 
@@ -1178,9 +1206,11 @@ export default function ReceiptsPage() {
                                   <Badge variant="outline" className="capitalize text-[10px] font-semibold">
                                     {group.category.replace(/_/g, ' ')}
                                   </Badge>
-                                  <span className="text-[11px] text-slate-500">
-                                    BDT {group.perMemberAmount.toLocaleString()} / member
-                                  </span>
+                                  {(group.transaction_no || group.id) && (
+                                    <span className="text-[11px] font-mono text-slate-500">
+                                      #{group.transaction_no || group.id}
+                                    </span>
+                                  )}
                                 </div>
                               </div>
                             </TableCell>
@@ -1242,9 +1272,76 @@ export default function ReceiptsPage() {
                                   )}
                                 </div>
 
-                                <div className="text-[10px] text-slate-500 flex justify-between">
-                                  <span>Collected: BDT {group.totalCollectedAmount.toLocaleString()}</span>
-                                  <span>Target: BDT {group.totalDemandAmount.toLocaleString()}</span>
+                                <div className="flex items-center justify-between text-[11px] pt-0.5">
+                                  <span className="text-emerald-700 font-bold">
+                                    Collected: BDT {group.totalCollectedAmount.toLocaleString()}
+                                  </span>
+                                  <span className="text-slate-600 font-semibold">
+                                    Target: BDT {group.totalDemandAmount.toLocaleString()}
+                                  </span>
+                                </div>
+
+                                {/* 5 Status Counters in their own distinct theme colors */}
+                                <div className="flex items-center gap-1 flex-wrap pt-1 border-t border-slate-200/80 text-[10px] font-bold">
+                                  <span
+                                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border transition-colors ${
+                                      group.paidCount > 0
+                                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-2xs'
+                                        : 'bg-slate-50 text-slate-400 border-slate-200'
+                                    }`}
+                                    title="Fully Paid / Cleared Members"
+                                  >
+                                    <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                                    {group.paidCount} Cleared
+                                  </span>
+
+                                  <span
+                                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border transition-colors ${
+                                      group.partiallyPaidCount > 0
+                                        ? 'bg-purple-50 text-purple-800 border-purple-300 shadow-2xs'
+                                        : 'bg-slate-50 text-slate-400 border-slate-200'
+                                    }`}
+                                    title="Partially Paid Members"
+                                  >
+                                    <Wallet className="h-3 w-3 text-purple-600" />
+                                    {group.partiallyPaidCount} Partial
+                                  </span>
+
+                                  <span
+                                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border transition-colors ${
+                                      group.receivedSlipCount > 0
+                                        ? 'bg-blue-50 text-blue-800 border-blue-300 shadow-2xs'
+                                        : 'bg-slate-50 text-slate-400 border-slate-200'
+                                    }`}
+                                    title="Payment Slip Received (Awaiting Confirmation)"
+                                  >
+                                    <FileCheck className="h-3 w-3 text-blue-600" />
+                                    {group.receivedSlipCount} Received
+                                  </span>
+
+                                  <span
+                                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border transition-colors ${
+                                      group.duePendingCount > 0
+                                        ? 'bg-amber-50 text-amber-900 border-amber-300 shadow-2xs'
+                                        : 'bg-slate-50 text-slate-400 border-slate-200'
+                                    }`}
+                                    title="Pending Unpaid Dues"
+                                  >
+                                    <Clock className="h-3 w-3 text-amber-600" />
+                                    {group.duePendingCount} Due
+                                  </span>
+
+                                  <span
+                                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border transition-colors ${
+                                      group.rejectedCount > 0
+                                        ? 'bg-red-50 text-red-800 border-red-300 shadow-2xs'
+                                        : 'bg-slate-50 text-slate-400 border-slate-200'
+                                    }`}
+                                    title="Rejected Proof Slips"
+                                  >
+                                    <XCircle className="h-3 w-3 text-red-600" />
+                                    {group.rejectedCount} Rejected
+                                  </span>
                                 </div>
                               </div>
                             </TableCell>
@@ -2134,37 +2231,37 @@ export default function ReceiptsPage() {
             DIALOG: COLLECT / SETTLE PAYMENT & ISSUE RECEIPT (ADMIN ONLY)
             ========================================================================= */}
         <Dialog open={openCollectModal} onOpenChange={setOpenCollectModal}>
-          <DialogContent className={collectingTrx?.receipt_photo ? "w-[96vw] max-w-6xl xl:max-w-7xl max-h-[95vh] overflow-y-auto p-5 sm:p-6" : "max-w-lg"}>
+          <DialogContent className={collectingTrx?.receipt_photo ? "w-[98vw] max-w-7xl xl:max-w-[1600px] 2xl:max-w-[1750px] max-h-[96vh] overflow-y-auto p-6 sm:p-8" : "w-[95vw] max-w-2xl sm:max-w-3xl max-h-[94vh] overflow-y-auto p-6 sm:p-8"}>
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-emerald-800 text-lg font-bold">
-                <Wallet className="h-5 w-5 text-emerald-700" />
+              <DialogTitle className="flex items-center gap-2.5 text-emerald-800 text-xl font-bold">
+                <Wallet className="h-6 w-6 text-emerald-700" />
                 Collect Payment &amp; Issue Official Receipt
               </DialogTitle>
             </DialogHeader>
 
             {collectingTrx && (
-              <div className={collectingTrx.receipt_photo ? "grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch pt-2" : "pt-1"}>
+              <div className={collectingTrx.receipt_photo ? "grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch pt-2" : "pt-1"}>
                 
                 {/* LEFT SIDE: Full Image Slip Preview with 2.5x Magnifier */}
                 {collectingTrx.receipt_photo && (
-                  <div className="lg:col-span-6 flex flex-col justify-between bg-slate-950 border border-slate-800 rounded-2xl p-4 shadow-inner text-white min-h-[500px] h-full">
-                    <div className="flex items-center justify-between pb-2.5 border-b border-slate-800 text-xs">
-                      <span className="font-bold text-emerald-400 flex items-center gap-1.5">
-                        <ImageIcon className="h-4 w-4 text-emerald-400" /> Member Payment Slip
+                  <div className="lg:col-span-6 flex flex-col justify-between bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-inner text-white min-h-[560px] h-full">
+                    <div className="flex items-center justify-between pb-3 border-b border-slate-800 text-xs">
+                      <span className="font-bold text-emerald-400 flex items-center gap-1.5 text-sm">
+                        <ImageIcon className="h-4.5 w-4.5 text-emerald-400" /> Member Payment Slip
                       </span>
                       {collectingTrx.receipt_photo_uploaded_at && (
-                        <span className="text-[11px] text-slate-400 font-mono">
+                        <span className="text-xs text-slate-400 font-mono">
                           {collectingTrx.receipt_photo_uploaded_at}
                         </span>
                       )}
                     </div>
 
-                    <div className="py-3 my-auto w-full flex-1 flex items-center justify-center">
+                    <div className="py-4 my-auto w-full flex-1 flex items-center justify-center">
                       <MagnifiableModalImage
                         src={collectingTrx.receipt_photo}
                         alt={`${collectingTrx.member?.name || 'Member'} Slip`}
                         zoomScale={2.5}
-                        className="min-h-[420px] max-h-[560px] w-full"
+                        className="min-h-[460px] max-h-[620px] w-full"
                       />
                     </div>
 
@@ -2199,74 +2296,74 @@ export default function ReceiptsPage() {
                 <div className={collectingTrx.receipt_photo ? "lg:col-span-6 flex flex-col justify-between" : ""}>
                   <form onSubmit={handleConfirmCollectPayment} className="space-y-4">
                     {/* Transaction Summary Card */}
-                    <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-2 text-xs">
+                    <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-2.5 text-sm">
                       <div className="flex items-center justify-between">
-                        <span className="font-bold text-sm text-emerald-950">
+                        <span className="font-bold text-base sm:text-lg text-emerald-950">
                           Member: {collectingTrx.member?.name}
                         </span>
-                        <span className="font-mono text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-bold">
+                        <span className="font-mono text-xs bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-md font-bold border border-emerald-200">
                           ID: {collectingTrx.member?.member_no || 'N/A'}
                         </span>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2 text-[11px] text-emerald-900 pt-1 border-t border-emerald-200/80">
+                      <div className="grid grid-cols-2 gap-2.5 text-sm text-emerald-900 pt-2 border-t border-emerald-200/80">
                         <div>
-                          <span className="text-slate-500">Transaction No:</span>{' '}
+                          <span className="text-slate-500 font-medium">Transaction No:</span>{' '}
                           <span className="font-mono font-bold">{collectingTrx.transaction_no}</span>
                         </div>
                         <div>
-                          <span className="text-slate-500">Fee Item:</span>{' '}
+                          <span className="text-slate-500 font-medium">Fee Item:</span>{' '}
                           <span className="font-bold">{collectingTrx.month || collectingTrx.description || 'Monthly Fee'}</span>
                         </div>
                         <div>
-                          <span className="text-slate-500">Due Amount:</span>{' '}
-                          <span className="font-bold font-mono">BDT {Number(collectingTrx.amount).toLocaleString()}</span>
+                          <span className="text-slate-500 font-medium">Due Amount:</span>{' '}
+                          <span className="font-bold font-mono text-emerald-950">BDT {Number(collectingTrx.amount).toLocaleString()}</span>
                         </div>
                         <div>
-                          <span className="text-slate-500">Due Date:</span>{' '}
-                          <span>{collectingTrx.transaction_date}</span>
+                          <span className="text-slate-500 font-medium">Due Date:</span>{' '}
+                          <span className="font-semibold">{collectingTrx.transaction_date}</span>
                         </div>
                       </div>
                     </div>
 
                     {/* Member Proof Auto-filled Note Banner (if member submitted proof details) */}
                     {(collectingTrx.receipt_photo || collectingTrx.member_paid_amount || collectingTrx.member_trx_reference || collectingTrx.member_comment) && (
-                      <div className="p-3 bg-emerald-50/90 border border-emerald-300 rounded-xl space-y-1.5 text-xs shadow-2xs">
-                        <div className="flex items-center justify-between font-bold text-emerald-950">
-                          <span className="flex items-center gap-1.5">
-                            <CheckCircle2 className="h-4 w-4 text-emerald-700" />
-                            Member Proof Auto-Filled (Review & Confirm)
+                      <div className="p-3.5 bg-emerald-50/90 border border-emerald-300 rounded-xl space-y-2 text-sm shadow-2xs">
+                        <div className="flex items-center justify-between font-bold text-emerald-950 text-sm sm:text-base">
+                          <span className="flex items-center gap-2">
+                            <CheckCircle2 className="h-5 w-5 text-emerald-700 shrink-0" />
+                            Member Proof Auto-Filled (Review &amp; Confirm)
                           </span>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px] text-emerald-900 pt-0.5">
-                          <div>Submitted Amount: <b>BDT {Number(collectingTrx.member_paid_amount || collectingTrx.amount).toLocaleString()}</b></div>
-                          <div>Payment Type: <b className="capitalize">{collectingTrx.member_payment_method?.replace(/_/g, ' ') || 'Not specified'}</b></div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-emerald-900 pt-1">
+                          <div>Submitted Amount: <b className="text-emerald-950">BDT {Number(collectingTrx.member_paid_amount || collectingTrx.amount).toLocaleString()}</b></div>
+                          <div>Payment Type: <b className="capitalize text-emerald-950">{collectingTrx.member_payment_method?.replace(/_/g, ' ') || 'Not specified'}</b></div>
                           {collectingTrx.member_trx_reference && (
-                            <div className="sm:col-span-2 font-mono">Reference / TrxID: <b>{collectingTrx.member_trx_reference}</b></div>
+                            <div className="sm:col-span-2 font-mono">Reference / TrxID: <b className="text-emerald-950">{collectingTrx.member_trx_reference}</b></div>
                           )}
                           {collectingTrx.member_comment && (
-                            <div className="sm:col-span-2">Member Note: <i>&ldquo;{collectingTrx.member_comment}&rdquo;</i></div>
+                            <div className="sm:col-span-2">Member Note: <i className="text-emerald-950 font-semibold">&ldquo;{collectingTrx.member_comment}&rdquo;</i></div>
                           )}
                         </div>
 
-                        <p className="text-[10px] text-emerald-700 italic border-t border-emerald-200/80 pt-1">
+                        <p className="text-xs text-emerald-700 italic border-t border-emerald-200/80 pt-1.5 leading-relaxed">
                           * The fields below have been auto-filled with these member details. You can adjust any value before confirming settlement.
                         </p>
                       </div>
                     )}
 
-                    <div className="space-y-3">
+                    <div className="space-y-3.5">
                       <div>
                         <div className="flex items-center justify-between">
-                          <Label className="text-xs font-bold text-slate-700 flex items-center gap-1">
-                            <Calculator className="h-3.5 w-3.5 text-emerald-700" />
+                          <Label className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                            <Calculator className="h-4 w-4 text-emerald-700" />
                             Collected Amount (BDT) <span className="text-rose-600">*</span>
                           </Label>
                           <button
                             type="button"
                             onClick={() => setPaidAmountInput(String(collectingTrx.amount))}
-                            className="text-[11px] font-bold text-emerald-800 hover:underline cursor-pointer bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200"
+                            className="text-xs font-bold text-emerald-800 hover:underline cursor-pointer bg-emerald-50 px-2.5 py-1 rounded border border-emerald-200"
                           >
                             Pay Full (BDT {Number(collectingTrx.amount).toLocaleString()})
                           </button>
@@ -2277,18 +2374,18 @@ export default function ReceiptsPage() {
                           value={paidAmountInput}
                           onChange={(e) => setPaidAmountInput(e.target.value)}
                           placeholder="e.g. 2000"
-                          className="mt-1 font-mono font-bold text-emerald-900 text-sm bg-white"
+                          className="mt-1.5 font-mono font-bold text-emerald-900 text-base h-10 bg-white"
                           required
                         />
                       </div>
 
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <Label className="text-xs font-bold text-slate-700">Payment Method</Label>
+                          <Label className="text-sm font-bold text-slate-800">Payment Method</Label>
                           <select
                             value={paymentMethodInput}
                             onChange={(e) => setPaymentMethodInput(e.target.value as any)}
-                            className="w-full border border-slate-300 rounded-md p-2 text-xs bg-white mt-1 capitalize"
+                            className="w-full border border-slate-300 rounded-md p-2.5 text-sm bg-white mt-1.5 capitalize h-10"
                           >
                             <option value="cash">Cash</option>
                             <option value="bank">Bank Transfer</option>
@@ -2298,42 +2395,54 @@ export default function ReceiptsPage() {
                         </div>
 
                         <div>
-                          <Label className="text-xs font-bold text-slate-700">Settlement Date</Label>
+                          <Label className="text-sm font-bold text-slate-800">Settlement Date</Label>
                           <Input
                             type="date"
                             value={paymentDateInput}
                             onChange={(e) => setPaymentDateInput(e.target.value)}
-                            className="mt-1 text-xs bg-white"
+                            className="mt-1.5 text-sm bg-white h-10"
                             required
                           />
                         </div>
                       </div>
 
-                      <div>
-                        <Label className="text-xs font-bold text-slate-700">Payment Notes / Trx Reference</Label>
-                        <Input
-                          type="text"
-                          value={paymentNotesInput}
-                          onChange={(e) => setPaymentNotesInput(e.target.value)}
-                          placeholder="e.g. Verified via Bank statement / bKash TrxID"
-                          className="mt-1 text-xs bg-white"
-                        />
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <Label className="text-sm font-bold text-slate-800">Transaction Reference / TrxID</Label>
+                          <Input
+                            type="text"
+                            value={paymentTrxRefInput}
+                            onChange={(e) => setPaymentTrxRefInput(e.target.value)}
+                            placeholder="e.g. bKash TrxID, Bank Ref, etc."
+                            className="mt-1.5 text-sm bg-white font-mono h-10"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-sm font-bold text-slate-800">Admin Settlement Note (Optional)</Label>
+                          <Input
+                            type="text"
+                            value={paymentNotesInput}
+                            onChange={(e) => setPaymentNotesInput(e.target.value)}
+                            placeholder="e.g. Verified via Bank statement / Office deposit"
+                            className="mt-1.5 text-sm bg-white h-10"
+                          />
+                        </div>
                       </div>
                     </div>
 
-                    <DialogFooter className="pt-2">
+                    <DialogFooter className="pt-3">
                       <Button
                         type="button"
                         variant="outline"
                         onClick={() => setOpenCollectModal(false)}
-                        className="cursor-pointer text-xs"
+                        className="cursor-pointer text-sm h-10 px-4"
                       >
                         Cancel
                       </Button>
                       <Button
                         type="submit"
                         disabled={isCollecting}
-                        className="cursor-pointer bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs"
+                        className="cursor-pointer bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm h-10 px-5"
                       >
                         {isCollecting ? 'Processing...' : 'Confirm & Settle Payment'}
                       </Button>

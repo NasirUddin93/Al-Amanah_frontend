@@ -211,10 +211,10 @@ export default function AdminDashboardPage() {
                   </div>
                   <ArrowRight className="h-4 w-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
                 </div>
-                <CardTitle className="text-sm font-bold text-slate-900 pt-2">Meeting Expenses</CardTitle>
+                <CardTitle className="text-sm font-bold text-slate-900 pt-2">Society Expenses</CardTitle>
               </CardHeader>
               <CardContent className="text-xs text-slate-600">
-                Record general meeting expenses, refreshment costs, logistics vouchers, and track audit receipts.
+                Create dynamic itemized expense sheets with labels and values, monitor disbursements, and print official vouchers.
               </CardContent>
             </Card>
           </Link>
