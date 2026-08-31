@@ -777,7 +777,7 @@ export default function AdminTransactionsPage() {
           memberNo: m.memberNo,
           memberRole: m.memberRole,
           memberHeader: m.memberName,
-          memberSubHeader: `FOLIO #${m.memberNo} • ${m.memberRole || 'Member'} • Phone: ${m.memberPhone || '-'}`,
+          memberSubHeader: `ID: ${m.memberNo} • ${m.memberRole || 'Member'} • Phone: ${m.memberPhone || '-'}`,
           monthSections,
           memberTotalPaid: m.totalPaid,
           memberTotalDue: m.totalDue,
@@ -838,7 +838,7 @@ export default function AdminTransactionsPage() {
       memberNo: memberGroup.memberNo,
       memberRole: memberGroup.memberRole,
       memberHeader: memberGroup.memberName,
-      memberSubHeader: `FOLIO #${memberGroup.memberNo} • ${memberGroup.memberRole || 'Member'} • Phone: ${memberGroup.memberPhone || '-'}`,
+      memberSubHeader: `ID: ${memberGroup.memberNo} • ${memberGroup.memberRole || 'Member'} • Phone: ${memberGroup.memberPhone || '-'}`,
       monthSections,
       memberTotalPaid: memberGroup.totalPaid,
       memberTotalDue: memberGroup.totalDue,
@@ -848,7 +848,7 @@ export default function AdminTransactionsPage() {
     const reportData: PrintingReportData = {
       level: 2,
       title: `Official Member Statement — ${memberGroup.memberName}`,
-      subtitle: `Folio #${memberGroup.memberNo} • Individual Account Statement`,
+      subtitle: `ID: ${memberGroup.memberNo} • Individual Account Statement`,
       date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
       sections: [section],
       grandTotalPaid: memberGroup.totalPaid,
@@ -1190,7 +1190,7 @@ export default function AdminTransactionsPage() {
                             <Table className="table-fixed w-full">
                               <TableHeader className="bg-slate-50">
                                 <TableRow className="text-[11px] font-bold text-slate-700">
-                                  <TableHead className="w-[26%] text-left py-3 px-3">MEMBER &amp; FOLIO</TableHead>
+                                  <TableHead className="w-[26%] text-left py-3 px-3">MEMBER &amp; ID</TableHead>
                                   <TableHead className="w-[18%] text-center py-3 px-2">TRANSACTION NO / REF</TableHead>
                                   <TableHead className="w-[14%] text-center py-3 px-2">STATUS</TableHead>
                                   <TableHead className="w-[14%] text-center py-3 px-2">SLIP PROOF</TableHead>
@@ -1211,7 +1211,7 @@ export default function AdminTransactionsPage() {
                                       <TableCell className="py-2.5 px-3">
                                         <div className="font-bold text-slate-900">{m?.name || 'Member'}</div>
                                         <div className="text-[11px] font-mono text-slate-500">
-                                          FOLIO #{m?.member_no || (m as any)?.member_profile?.member_no || '-'}
+                                          ID: {m?.member_no || (m as any)?.member_profile?.member_no || '-'}
                                         </div>
                                       </TableCell>
 
@@ -1332,7 +1332,7 @@ export default function AdminTransactionsPage() {
                             <div className="flex items-center gap-2">
                               <h3 className="font-bold text-slate-900 text-base">{memberGroup.memberName}</h3>
                               <span className="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-100 text-slate-700 border border-slate-200">
-                                FOLIO #{memberGroup.memberNo}
+                                ID: {memberGroup.memberNo}
                               </span>
                               <span className="text-xs text-slate-400 font-medium">({memberGroup.memberRole})</span>
                             </div>
@@ -1510,7 +1510,7 @@ export default function AdminTransactionsPage() {
                 <TableHeader className="bg-slate-50">
                   <TableRow className="text-[11px] font-bold text-slate-700">
                     <TableHead className="w-[12%] text-left py-3 px-3">DATE</TableHead>
-                    <TableHead className="w-[20%] text-left py-3 px-2">MEMBER &amp; FOLIO</TableHead>
+                    <TableHead className="w-[20%] text-left py-3 px-2">MEMBER &amp; ID</TableHead>
                     <TableHead className="w-[22%] text-left py-3 px-2">PARTICULARS / DESCRIPTION</TableHead>
                     <TableHead className="w-[16%] text-center py-3 px-2">TRANSACTION ID / REF</TableHead>
                     <TableHead className="w-[10%] text-center py-3 px-2">STATUS</TableHead>
@@ -1540,7 +1540,7 @@ export default function AdminTransactionsPage() {
 
                         <TableCell className="py-3 px-2">
                           <div className="font-bold text-slate-900">{item.memberName}</div>
-                          <div className="text-[11px] font-mono text-slate-500">FOLIO #{item.memberNo}</div>
+                          <div className="text-[11px] font-mono text-slate-500">ID: {item.memberNo}</div>
                         </TableCell>
 
                         <TableCell className="py-3 px-2">

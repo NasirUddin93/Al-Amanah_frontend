@@ -5,17 +5,19 @@ interface DialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   children: React.ReactNode
+  className?: string
+  overlayClassName?: string
 }
 
-export function Dialog({ open, onOpenChange, children }: DialogProps) {
+export function Dialog({ open, onOpenChange, children, className, overlayClassName }: DialogProps) {
   if (!open) return null
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+    <div className={cn("fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto", className)}>
       <div
-        className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
+        className={cn("fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity", overlayClassName)}
         onClick={() => onOpenChange(false)}
       />
-      <div className="relative z-50 flex items-center justify-center w-full pointer-events-none my-auto">
+      <div className="relative z-10 flex items-center justify-center w-full pointer-events-none my-auto">
         <div className="pointer-events-auto w-full flex items-center justify-center">
           {children}
         </div>

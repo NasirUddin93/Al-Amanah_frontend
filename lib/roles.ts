@@ -21,5 +21,14 @@ export const isStaff = (user: User | null | undefined) =>
 export const canManageTransactions = (user: User | null | undefined) =>
   hasRole(user, ['super_admin', 'admin']);
 
+export const canCreateTransactions = (user: User | null | undefined) => {
+  const u = (user as any)?.data || user;
+  if (!u) return false;
+  const roleName = getRoleName(u);
+  if (roleName === 'super_admin' || u.email === 'superadmin@alamanah.com') return true;
+  if (roleName === 'admin') return Boolean(u.can_change_payment);
+  return false;
+};
+
 export const canManageReceipts = (user: User | null | undefined) =>
   hasRole(user, ['super_admin', 'admin', 'accountant']);

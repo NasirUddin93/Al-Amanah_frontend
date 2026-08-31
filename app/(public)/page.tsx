@@ -11,43 +11,53 @@ export default function HomePage() {
   return (
     <>
       {/* HERO */}
-      <header className="hero">
+      <header className="hero px-4 sm:px-0 py-10 sm:py-16 lg:py-24">
         <div className="blob" style={{ width: 420, height: 420, background: 'var(--green-200)', top: -120, right: -80 }} />
         <div className="blob" style={{ width: 320, height: 320, background: '#bbf7d0', bottom: -100, left: -90, animationDelay: '3s' }} />
         <div className="container hero-grid">
           <div>
-            <span className="hero-badge">🌙 A Sacred Trust — “Amanat” • Est. 2026</span>
-            <Reveal delay={100}><h1>Saving Together,<br /><span className="grad">Growing Together,</span><br />Caring Forever.</h1></Reveal>
-            <Reveal delay={200}><p className="bn" style={{ color: 'var(--green-700)', fontWeight: 600, fontSize: 18, marginBottom: 14 }}>আল-আমানাহ সঞ্চয় ও কল্যাণ সোসাইটি — ঐক্যই শক্তি</p></Reveal>
+            <span className="hero-badge text-xs sm:text-sm">🌙 A Sacred Trust — “Amanat” • Est. 2026</span>
+            <Reveal delay={100}><h1 className="text-3xl sm:text-4xl lg:text-5xl tracking-tight">Saving Together,<br /><span className="grad">Growing Together,</span><br />Caring Forever.</h1></Reveal>
+            <Reveal delay={200}><p className="bn text-base sm:text-lg" style={{ color: 'var(--green-700)', fontWeight: 600, marginBottom: 14 }}>আল-আমানাহ সঞ্চয় ও কল্যাণ সোসাইটি — ঐক্যই শক্তি</p></Reveal>
             <Reveal delay={200}>
-              <p className="lead">A non-political, mutual-aid, welfare and micro-investment cooperative society — built on unity, Shariah-compliant values and the belief that <em>“many a little makes a mickle.”</em></p>
+              <p className="lead text-sm sm:text-base leading-relaxed">A non-political, mutual-aid, welfare and micro-investment cooperative society — built on unity, Shariah-compliant values and the belief that <em>“many a little makes a mickle.”</em></p>
             </Reveal>
             <Reveal delay={300}>
-              <div className="motto">
+              <div className="motto p-3.5 sm:p-4 text-xs sm:text-sm">
                 <p className="serif">“And those who are faithfully true to their trusts (Amanat) and to their covenants.”</p>
                 <span>— Surah Al-Mu’minun [23:8]</span>
               </div>
             </Reveal>
             <Reveal delay={300}>
-              <div className="hero-cta">
-                <Link href="/membership" className="btn btn-green">Become a Member</Link>
-                <Link href="/constitution" className="btn btn-ghost">Read Our Constitution</Link>
+              <div className="hero-cta flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+                <Link href="/membership" className="btn btn-green w-full sm:w-auto text-center justify-center">Become a Member</Link>
+                <Link href="/constitution" className="btn btn-ghost w-full sm:w-auto text-center justify-center">Read Our Constitution</Link>
               </div>
             </Reveal>
             <Reveal delay={400}>
-              <div className="hero-stats">
-                <div className="stat"><b><Counter to={2026} /></b><span>Established</span></div>
-                <div className="stat"><b><Counter to={5} /></b><span>Year Tenure</span></div>
-                <div className="stat"><b><Counter to={30} /></b><span>Day Meetings</span></div>
-                <div className="stat"><b><Counter to={100} suffix="%" /></b><span>Halal Invest</span></div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3 max-w-xl mt-6">
+                <div className="stat p-3 sm:p-4 rounded-xl bg-white border border-emerald-100 shadow-2xs"><b><Counter to={2026} /></b><span>Established</span></div>
+                <div className="stat p-3 sm:p-4 rounded-xl bg-white border border-emerald-100 shadow-2xs"><b><Counter to={5} /></b><span>Year Tenure</span></div>
+                <div className="stat p-3 sm:p-4 rounded-xl bg-white border border-emerald-100 shadow-2xs"><b><Counter to={30} /></b><span>Day Meetings</span></div>
+                <div className="stat p-3 sm:p-4 rounded-xl bg-white border border-emerald-100 shadow-2xs"><b><Counter to={100} suffix="%" /></b><span>Halal Invest</span></div>
               </div>
             </Reveal>
           </div>
 
-          <Reveal delay={200} className="hero-visual">
-            <ImgHolder label="Society Group Photo" size="900 × 1100 px" height={480} />
-            <div className="float-card fc-1"><div className="ico">🕌</div><div><b>Shariah-Compliant</b><span>Interest-free investment</span></div></div>
-            <div className="float-card fc-2"><div className="ico">🛡️</div><div><b>Amanat Principle</b><span>Deposits as sacred trust</span></div></div>
+          <Reveal delay={200} className="hero-visual mt-6 lg:mt-0">
+            <ImgHolder label="Society Group Photo" size="900 × 1100 px" height={360} />
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:hidden gap-2.5 mt-3">
+              <div className="bg-white rounded-xl p-3 border border-emerald-100 shadow-2xs flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-lg bg-emerald-100 flex items-center justify-center text-lg">🕌</div>
+                <div><b className="text-xs text-slate-900 block">Shariah-Compliant</b><span className="text-[11px] text-slate-500">Interest-free investment</span></div>
+              </div>
+              <div className="bg-white rounded-xl p-3 border border-emerald-100 shadow-2xs flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-lg bg-amber-100 flex items-center justify-center text-lg">🛡️</div>
+                <div><b className="text-xs text-slate-900 block">Amanat Principle</b><span className="text-[11px] text-slate-500">Deposits as sacred trust</span></div>
+              </div>
+            </div>
+            <div className="float-card fc-1 hidden lg:flex"><div className="ico">🕌</div><div><b>Shariah-Compliant</b><span>Interest-free investment</span></div></div>
+            <div className="float-card fc-2 hidden lg:flex"><div className="ico">🛡️</div><div><b>Amanat Principle</b><span>Deposits as sacred trust</span></div></div>
           </Reveal>
         </div>
       </header>

@@ -5,7 +5,7 @@ import { AdminLayout } from '@/components/admin-layout';
 
 export default function AdminRootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <AuthGuard allowedRoles={['admin', 'super_admin']} fallbackUrl="/member">
+    <AuthGuard allowedRoles={['admin', 'super_admin', 'accountant']} fallbackUrl="/member">
       <AdminLayout>{children}</AdminLayout>
     </AuthGuard>
   );

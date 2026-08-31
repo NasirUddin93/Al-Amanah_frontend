@@ -1,89 +1,141 @@
 'use client';
-import React, { useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { useAppSelector } from '@/store/hooks';
-import { canManageTransactions } from '@/lib/roles';
-import { useGetFdrsQuery, useCreateFdrMutation, useGetUsersQuery } from '@/lib/api';
-import { fdrSchema } from '@/lib/schemas';
+
+import React from 'react';
+import Link from 'next/link';
+import { RoleGate } from '@/components/role-gate';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Badge } from '@/components/ui/badge';
+import {
+  PiggyBank,
+  Clock,
+  Sparkles,
+  ArrowLeft,
+  Calendar,
+  CheckCircle2,
+  ShieldCheck,
+  TrendingUp,
+  FileCheck2,
+  AlertCircle,
+} from 'lucide-react';
 
 export default function AdminFdrsPage() {
-  const user = useAppSelector((s) => s.auth.user);
-  const staff = canManageTransactions(user);
-  const { data, isLoading } = useGetFdrsQuery();
-  const [create] = useCreateFdrMutation();
-  const { data: users } = useGetUsersQuery(undefined, { skip: !staff });
-  const [open, setOpen] = useState(false);
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<any>({
-    resolver: zodResolver(fdrSchema),
-    defaultValues: { member_id: '', amount: '', start_date: '', maturity_date: '' },
-  });
-
   return (
-    <div className="space-y-4">
-      <div className="flex justify-between items-center">
+    <RoleGate roles={['super_admin', 'admin']}>
+      <FdrUnavailableContent />
+    </RoleGate>
+  );
+}
+
+function FdrUnavailableContent() {
+  return (
+    <div className="space-y-6 max-w-4xl mx-auto py-4 sm:py-8 px-2 sm:px-4">
+      {/* HEADER */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-2xs">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Fixed Deposit Receipts (FDR)</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Manage fixed term investment deposits and maturity tracking.</p>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl font-black tracking-tight text-slate-900 flex items-center gap-2">
+              <PiggyBank className="h-7 w-7 text-amber-600" />
+              Fixed Deposit Receipts (FDR)
+            </h1>
+            <Badge className="bg-amber-100 text-amber-900 border-amber-300 font-bold uppercase text-[10px] tracking-wider">
+              Not Available Yet
+            </Badge>
+          </div>
+          <p className="text-sm text-slate-500 mt-1">
+            Term deposit certificates, maturity tracking, and society long-term investment accounts.
+          </p>
         </div>
-        {staff && <Button onClick={() => setOpen(true)} className="bg-emerald-700 hover:bg-emerald-800 cursor-pointer">Add FDR</Button>}
+
+        <Link href="/admin">
+          <Button variant="outline" size="sm" className="gap-2 cursor-pointer text-xs font-bold rounded-xl h-9">
+            <ArrowLeft className="h-4 w-4" />
+            <span>Back to Dashboard</span>
+          </Button>
+        </Link>
       </div>
-      <Card className="border-slate-200">
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader className="bg-slate-50/80">
-              <TableRow>
-                <TableHead className="font-bold text-slate-900">FDR No</TableHead>
-                <TableHead className="font-bold text-slate-900">Member</TableHead>
-                <TableHead className="font-bold text-slate-900">Amount</TableHead>
-                <TableHead className="font-bold text-slate-900">Start Date</TableHead>
-                <TableHead className="font-bold text-slate-900">Maturity</TableHead>
-                <TableHead className="font-bold text-slate-900">Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading && <TableRow><TableCell colSpan={6} className="text-center py-6 text-slate-500">Loading FDRs...</TableCell></TableRow>}
-              {data?.data.length === 0 && !isLoading && <TableRow><TableCell colSpan={6} className="text-center py-6 text-slate-500">No FDR records found.</TableCell></TableRow>}
-              {data?.data.map((f) => (
-                <TableRow key={f.id} className="hover:bg-slate-50/70 transition-colors">
-                  <TableCell className="font-mono font-medium text-slate-900">{f.fdr_no}</TableCell>
-                  <TableCell className="font-medium text-slate-800">{f.member?.name}</TableCell>
-                  <TableCell className="font-bold text-slate-900">BDT {Number(f.amount).toLocaleString()}</TableCell>
-                  <TableCell className="text-slate-600">{f.start_date}</TableCell>
-                  <TableCell className="text-slate-600">{f.maturity_date ?? '-'}</TableCell>
-                  <TableCell><Badge variant="outline" className="capitalize bg-emerald-50 text-emerald-800 border-emerald-200">{f.status}</Badge></TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+
+      {/* HERO COMING SOON CARD */}
+      <Card className="border-slate-200 shadow-sm rounded-3xl overflow-hidden bg-white">
+        <CardContent className="p-8 sm:p-12 flex flex-col items-center text-center space-y-6">
+          {/* Animated Icon Avatar */}
+          <div className="relative">
+            <div className="h-24 w-24 rounded-3xl bg-amber-50 border-2 border-amber-200 flex items-center justify-center text-amber-600 shadow-md">
+              <PiggyBank className="h-12 w-12" />
+            </div>
+            <div className="absolute -bottom-2 -right-2 h-8 w-8 rounded-full bg-slate-900 text-white flex items-center justify-center shadow">
+              <Clock className="h-4 w-4 text-amber-400" />
+            </div>
+          </div>
+
+          <div className="space-y-2 max-w-lg">
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+              FDR Module is Under Development
+            </h2>
+            <p className="text-sm sm:text-base text-slate-500 leading-relaxed">
+              The <b>Fixed Deposit Receipts (FDR)</b> module is not available yet in the current release of the Al-Amanah system. Our development team is currently building and testing this feature.
+            </p>
+          </div>
+
+          {/* UPCOMING CAPABILITIES LIST */}
+          <div className="w-full max-w-xl bg-slate-50 border border-slate-200 rounded-2xl p-5 sm:p-6 text-left space-y-4">
+            <div className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2 border-b border-slate-200 pb-2.5">
+              <Sparkles className="h-4 w-4 text-amber-600" />
+              <span>What this module will include when launched</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs sm:text-sm text-slate-700">
+              <div className="flex items-start gap-2.5 p-2 rounded-xl bg-white border border-slate-200/80 shadow-2xs">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold text-slate-900 block text-xs">Term Certificate Records</span>
+                  <span className="text-[11px] text-slate-500">1-Year, 3-Year &amp; 5-Year fixed deposit tenures.</span>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-2.5 p-2 rounded-xl bg-white border border-slate-200/80 shadow-2xs">
+                <TrendingUp className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold text-slate-900 block text-xs">Maturity &amp; Profit Calculator</span>
+                  <span className="text-[11px] text-slate-500">Automated accrual and maturity date alerts.</span>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-2.5 p-2 rounded-xl bg-white border border-slate-200/80 shadow-2xs">
+                <FileCheck2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold text-slate-900 block text-xs">Official PDF Certificates</span>
+                  <span className="text-[11px] text-slate-500">Download and print verified member certificates.</span>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-2.5 p-2 rounded-xl bg-white border border-slate-200/80 shadow-2xs">
+                <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold text-slate-900 block text-xs">Audit &amp; Security Logs</span>
+                  <span className="text-[11px] text-slate-500">Full audit trail of renewals and liquidations.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ACTION BUTTONS */}
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            <Link href="/admin">
+              <Button className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold h-11 px-6 rounded-xl cursor-pointer shadow-md text-xs sm:text-sm gap-2">
+                <ArrowLeft className="h-4 w-4" />
+                <span>Return to Dashboard</span>
+              </Button>
+            </Link>
+
+            <Link href="/admin/transactions">
+              <Button variant="outline" className="border-slate-300 text-slate-700 hover:bg-slate-50 font-bold h-11 px-6 rounded-xl cursor-pointer text-xs sm:text-sm">
+                <span>View Billing &amp; Demands</span>
+              </Button>
+            </Link>
+          </div>
         </CardContent>
       </Card>
-
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Add FDR</DialogTitle></DialogHeader>
-          <form className="space-y-3 pt-2" onSubmit={handleSubmit(async (v) => { await create({ ...v, member_id: Number(v.member_id), amount: Number(v.amount) }).unwrap(); setOpen(false); reset(); })}>
-            <div><Label>Member</Label>
-              <select className="w-full border border-slate-200 rounded-md p-2 text-sm bg-white mt-1" {...register('member_id')}>
-                <option value="">Select member</option>
-                {users?.data.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-              </select>
-              {errors.member_id && <p className="text-xs text-red-600 mt-1">{String(errors.member_id.message)}</p>}
-            </div>
-            <div><Label>Amount (BDT)</Label><Input type="number" step="0.01" placeholder="0.00" {...register('amount')} className="mt-1 bg-white" />{errors.amount && <p className="text-xs text-red-600 mt-1">{String(errors.amount.message)}</p>}</div>
-            <div><Label>Start Date</Label><Input type="date" {...register('start_date')} className="mt-1 bg-white" />{errors.start_date && <p className="text-xs text-red-600 mt-1">{String(errors.start_date.message)}</p>}</div>
-            <div><Label>Maturity Date</Label><Input type="date" {...register('maturity_date')} className="mt-1 bg-white" /></div>
-            <Button type="submit" className="w-full mt-4 bg-emerald-700 hover:bg-emerald-800 cursor-pointer">Save FDR</Button>
-          </form>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

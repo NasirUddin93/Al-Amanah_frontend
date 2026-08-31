@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useAppSelector } from '@/store/hooks';
-import { canManageReceipts } from '@/lib/roles';
+import { canManageReceipts, canManageTransactions, canCreateTransactions } from '@/lib/roles';
 import {
   useGetReceiptsQuery,
   useCreateReceiptMutation,
@@ -69,7 +69,9 @@ import {
   Edit2,
   Trash2,
   Sparkles,
+  ShieldCheck,
 } from 'lucide-react';
+import { formatDateTime, formatDate } from '@/lib/utils';
 
 interface MemberReceiptItem {
   id: string | number;
@@ -131,6 +133,7 @@ function extractInputtedReference(trx?: any, receipt?: any): string {
 export default function AdminReceiptsPage() {
   const user = useAppSelector((s) => s.auth.user);
   const canManage = canManageReceipts(user);
+  const canEditTrx = canCreateTransactions(user);
 
   // Top Tabs: Created Transaction Batches vs Member-wise Receipts vs All Receipts Table
   const [activeTab, setActiveTab] = useState<'created' | 'members' | 'all'>('created');
@@ -184,13 +187,6 @@ export default function AdminReceiptsPage() {
   const [demandDescription, setDemandDescription] = useState('');
   const [demandTrxNo, setDemandTrxNo] = useState<string>('');
 
-  const generateAutoTrxNo = () => {
-    const d = new Date();
-    const ymd = d.getFullYear().toString() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
-    const rnd = Math.floor(1000 + Math.random() * 9000);
-    setDemandTrxNo(`TRX-${ymd}-${rnd}`);
-  };
-
   const [openPhotoModal, setOpenPhotoModal] = useState(false);
   const [photoModalUrl, setPhotoModalUrl] = useState<string>('');
   const [photoModalTitle, setPhotoModalTitle] = useState<string>('');
@@ -204,8 +200,29 @@ export default function AdminReceiptsPage() {
   const [paidAmountInput, setPaidAmountInput] = useState<string>('');
   const [paymentMethodInput, setPaymentMethodInput] = useState<'cash' | 'bank' | 'mobile_banking' | 'other'>('cash');
   const [paymentDateInput, setPaymentDateInput] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [paymentTimeInput, setPaymentTimeInput] = useState<string>('');
+  const [currentTime, setCurrentTime] = useState<string>('');
   const [paymentTrxRefInput, setPaymentTrxRefInput] = useState<string>('');
   const [paymentNotesInput, setPaymentNotesInput] = useState<string>('');
+
+  const getCurrentTimeHM = () => {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  };
+
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      setCurrentTime(
+        now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) +
+        ', ' +
+        now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
+      );
+    };
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Reject Proof Slip Modal State
   const [openRejectModal, setOpenRejectModal] = useState(false);
@@ -269,6 +286,39 @@ export default function AdminReceiptsPage() {
   const rawTransactions: Transaction[] = useMemo(() => {
     return transactionsData?.data || [];
   }, [transactionsData]);
+
+  const generateAutoTrxNo = () => {
+    const d = new Date();
+    const ymd = d.getFullYear().toString() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
+    let candidate = '';
+    let exists = true;
+    let attempts = 0;
+    while (exists && attempts < 50) {
+      const rnd = Math.floor(1000 + Math.random() * 9000);
+      candidate = `TRX-${ymd}-${rnd}`;
+      exists = rawTransactions.some((t) => (t.transaction_no || '').toLowerCase() === candidate.toLowerCase());
+      attempts++;
+    }
+    setDemandTrxNo(candidate);
+  };
+
+  const isTrxNoDuplicate = useMemo(() => {
+    if (!demandTrxNo.trim()) return false;
+    const inputClean = demandTrxNo.trim().toLowerCase();
+    return rawTransactions.some((t) => (t.transaction_no || '').toLowerCase() === inputClean);
+  }, [demandTrxNo, rawTransactions]);
+
+  const isCollectTrxRefDuplicate = useMemo(() => {
+    if (!paymentTrxRefInput.trim() || !collectingTrx) return null;
+    const cleanRef = paymentTrxRefInput.trim().toLowerCase();
+    return rawTransactions.find(
+      (t) =>
+        t.id !== collectingTrx.id &&
+        t.member_trx_reference &&
+        t.member_trx_reference.trim().toLowerCase() === cleanRef &&
+        t.status !== 'rejected'
+    ) || null;
+  }, [paymentTrxRefInput, collectingTrx, rawTransactions]);
 
   const membersList: User[] = useMemo(() => {
     const rawUsers = usersData?.data || [];
@@ -695,8 +745,8 @@ export default function AdminReceiptsPage() {
       const rejectedList = sorted.filter((t) => t.status === 'rejected');
 
       const isFullyPaid = paidList.length > 0 && pendingList.length === 0;
-      const isPartial = paidList.length > 0 && pendingList.length > 0;
       const isSlipReceived = !isFullyPaid && pendingList.some((t) => !!t.receipt_photo);
+      const isPartial = !isSlipReceived && paidList.length > 0 && pendingList.length > 0;
       const isRejectedActive = !isFullyPaid && !isPartial && !isSlipReceived && rejectedList.length > 0;
 
       const demandPaidTotal = paidList.reduce((sum, t) => sum + Number(t.amount || 0), 0);
@@ -817,37 +867,205 @@ export default function AdminReceiptsPage() {
   }, [memberReceiptGroups, statusFilter, paymentMethodFilter, searchQuery]);
 
   const getModifierInfo = (t: Transaction | any) => {
+    const isUpdated = Boolean(
+      (t.last_modified_by?.action === 'Updated') ||
+      (t.updated_by && t.updated_at && t.created_at && t.updated_at !== t.created_at)
+    );
+    const actionDate = isUpdated ? (t.updated_at || t.created_at) : (t.created_at || t.updated_at);
+
     if (t.last_modified_by && typeof t.last_modified_by === 'object') {
       return {
+        id: t.last_modified_by.id,
         name: t.last_modified_by.name,
         role: t.last_modified_by.role || 'Admin',
-        action: t.last_modified_by.action || 'Created',
+        member_no: t.last_modified_by.member_no,
+        action: t.last_modified_by.action || (isUpdated ? 'Updated' : 'Created'),
+        date: actionDate,
       };
     }
 
     if (t.updated_by) {
       if (typeof t.updated_by === 'object') {
         return {
+          id: t.updated_by.id,
           name: t.updated_by.name,
           role: t.updated_by.role || 'Admin',
+          member_no: t.updated_by.member_no,
           action: 'Updated',
+          date: actionDate,
         };
       }
-      return { name: String(t.updated_by), role: 'Admin', action: 'Updated' };
+      return { name: String(t.updated_by), role: 'Admin', action: 'Updated', date: actionDate };
     }
 
     if (t.created_by) {
       if (typeof t.created_by === 'object') {
         return {
+          id: t.created_by.id,
           name: t.created_by.name,
           role: t.created_by.role || 'Admin',
+          member_no: t.created_by.member_no,
           action: 'Created',
+          date: t.created_at,
         };
       }
-      return { name: String(t.created_by), role: 'Admin', action: 'Created' };
+      return { name: String(t.created_by), role: 'Admin', action: 'Created', date: t.created_at };
     }
 
-    return { name: 'Super Admin', role: 'super_admin', action: 'Created' };
+    return { name: 'Super Admin', role: 'super_admin', action: 'Created', date: t.created_at || t.updated_at };
+  };
+
+  const getAuditorInfo = (itemOrTrx: Transaction | MemberReceiptItem | any) => {
+    const trx: Transaction | undefined = itemOrTrx?.rawTransaction || (itemOrTrx?.transaction_no ? itemOrTrx : undefined);
+    const rct: Receipt | undefined = itemOrTrx?.rawReceipt || (itemOrTrx?.receipt_no ? itemOrTrx : undefined) || trx?.receipt;
+
+    const st = String(itemOrTrx?.status || trx?.status || (rct ? 'paid' : '')).toLowerCase();
+
+    // 1. If Paid / Cleared / Settled
+    if (st.includes('paid') || itemOrTrx?.recordType === 'receipt' || itemOrTrx?.isPartial) {
+      const rctConfirmed = rct?.confirmed_by || rct?.created_by;
+      const settledDate = (rct as any)?.confirmed_at || (rct as any)?.created_at || trx?.updated_at || trx?.created_at;
+
+      if (rctConfirmed && typeof rctConfirmed === 'object') {
+        return {
+          id: rctConfirmed.id,
+          name: rctConfirmed.name,
+          role: rctConfirmed.role || 'Admin',
+          member_no: rctConfirmed.member_no,
+          action: 'Confirmed by',
+          date: settledDate,
+        };
+      }
+
+      if (trx?.updated_by && typeof trx.updated_by === 'object') {
+        return {
+          id: trx.updated_by.id,
+          name: trx.updated_by.name,
+          role: trx.updated_by.role || 'Admin',
+          member_no: trx.updated_by.member_no,
+          action: 'Confirmed by',
+          date: trx.updated_at || trx.created_at,
+        };
+      }
+
+      if (trx?.last_modified_by && typeof trx.last_modified_by === 'object') {
+        return {
+          id: trx.last_modified_by.id,
+          name: trx.last_modified_by.name,
+          role: trx.last_modified_by.role || 'Admin',
+          member_no: trx.last_modified_by.member_no,
+          action: 'Confirmed by',
+          date: trx.updated_at || trx.created_at,
+        };
+      }
+
+      if (trx?.created_by && typeof trx.created_by === 'object') {
+        return {
+          id: trx.created_by.id,
+          name: trx.created_by.name,
+          role: trx.created_by.role || 'Admin',
+          member_no: trx.created_by.member_no,
+          action: 'Settled by',
+          date: trx.updated_at || trx.created_at,
+        };
+      }
+
+      return {
+        id: 1,
+        name: 'Super Admin',
+        role: 'super_admin',
+        action: 'Confirmed by',
+        date: trx?.updated_at || trx?.created_at,
+      };
+    }
+
+    // 2. If Rejected
+    if (st === 'rejected' || itemOrTrx?.isRejected) {
+      const rejDate = trx?.updated_at || trx?.created_at;
+      if (trx?.updated_by && typeof trx.updated_by === 'object') {
+        return {
+          id: trx.updated_by.id,
+          name: trx.updated_by.name,
+          role: trx.updated_by.role || 'Admin',
+          member_no: trx.updated_by.member_no,
+          action: 'Rejected by',
+          date: rejDate,
+        };
+      }
+
+      if (trx?.last_modified_by && typeof trx.last_modified_by === 'object') {
+        return {
+          id: trx.last_modified_by.id,
+          name: trx.last_modified_by.name,
+          role: trx.last_modified_by.role || 'Admin',
+          member_no: trx.last_modified_by.member_no,
+          action: 'Rejected by',
+          date: rejDate,
+        };
+      }
+
+      if (trx?.created_by && typeof trx.created_by === 'object') {
+        return {
+          id: trx.created_by.id,
+          name: trx.created_by.name,
+          role: trx.created_by.role || 'Admin',
+          member_no: trx.created_by.member_no,
+          action: 'Rejected by',
+          date: rejDate,
+        };
+      }
+
+      return {
+        id: 1,
+        name: 'Super Admin',
+        role: 'super_admin',
+        action: 'Rejected by',
+        date: rejDate,
+      };
+    }
+
+    return null;
+  };
+
+  const renderStaffAuditBadge = (
+    auditor: { id?: number | string; name: string; role?: string; member_no?: string; action?: string; date?: string } | null,
+    isConfirmed?: boolean
+  ) => {
+    if (!auditor || !auditor.name) return null;
+    const roleDisplay = auditor.role?.replace(/_/g, ' ') || 'Admin';
+    const idDisplay = auditor.member_no ? `#${auditor.member_no}` : (auditor.id ? `#${auditor.id}` : '');
+    const isRej = auditor.action?.toLowerCase().includes('reject');
+
+    return (
+      <div className="mt-1 flex flex-col items-center justify-center text-[10px] leading-tight select-none gap-0.5">
+        <span className={`text-[9px] font-bold uppercase tracking-wider ${isRej ? 'text-red-700' : 'text-emerald-800'}`}>
+          {auditor.action || (isConfirmed ? 'Confirmed by' : 'Audited by')}
+        </span>
+        <div
+          className={`inline-flex items-center gap-1 font-semibold px-2 py-0.5 rounded-md border shadow-2xs ${
+            isRej
+              ? 'bg-red-50 text-red-950 border-red-200'
+              : 'bg-emerald-50/90 text-emerald-950 border-emerald-200'
+          }`}
+          title={`Staff Auditor: ${auditor.name} (${roleDisplay} ${idDisplay})`}
+        >
+          <ShieldCheck className={`h-3 w-3 shrink-0 ${isRej ? 'text-red-600' : 'text-emerald-700'}`} />
+          <span className="font-bold truncate max-w-[110px]">{auditor.name}</span>
+          <span
+            className={`text-[9px] font-mono uppercase px-1 py-0.2 rounded font-bold ${
+              isRej ? 'bg-red-200/80 text-red-900' : 'bg-emerald-200/80 text-emerald-900'
+            }`}
+          >
+            {roleDisplay} {idDisplay}
+          </span>
+        </div>
+        {auditor.date && (
+          <span className="text-[9px] text-slate-500 font-mono">
+            {formatDateTime(auditor.date)}
+          </span>
+        )}
+      </div>
+    );
   };
 
   const createdDemandGroups = useMemo(() => {
@@ -939,18 +1157,30 @@ export default function AdminReceiptsPage() {
       let fullyPaidMembersCount = 0;
       let partiallyPaidMembersCount = 0;
       let unpaidMembersCount = 0;
+      let receivedSlipCount = 0;
+      let rejectedCount = 0;
 
-      Object.values(memberStatusMap).forEach((st) => {
+      Object.entries(memberStatusMap).forEach(([mId, st]) => {
         if (st.hasPaid && !st.hasPending) {
           fullyPaidMembersCount += 1;
+          return;
+        }
+        const mTrxList = g.transactions.filter((t) => (String(t.member?.id) === String(mId) || String((t as any).member_id) === String(mId)));
+        const hasSlip = mTrxList.some((t) => t.status === 'pending' && !!t.receipt_photo);
+        const isRej = mTrxList.some((t) => t.status === 'rejected') && !hasSlip;
+
+        if (hasSlip) {
+          receivedSlipCount += 1;
+        } else if (isRej) {
+          rejectedCount += 1;
         } else if (st.hasPaid && st.hasPending) {
           partiallyPaidMembersCount += 1;
-        } else if (!st.hasPaid && st.hasPending) {
+        } else {
           unpaidMembersCount += 1;
         }
       });
 
-      const pendingMembersCount = partiallyPaidMembersCount + unpaidMembersCount;
+      const pendingMembersCount = partiallyPaidMembersCount + unpaidMembersCount + receivedSlipCount + rejectedCount;
 
       const memberProgressPercent = totalMembersAssigned > 0
         ? Math.min(100, Math.round((fullyPaidMembersCount / totalMembersAssigned) * 100))
@@ -961,22 +1191,8 @@ export default function AdminReceiptsPage() {
         : (totalCollectedAmount > 0 ? 100 : 0);
       const isFullyPaid = pendingMembersCount === 0 && totalMembersAssigned > 0;
 
-      // Calculate 5-status count breakdown for each demand group
-      let duePendingCount = 0;
-      let receivedSlipCount = 0;
-      let rejectedCount = 0;
-
-      Object.entries(memberStatusMap).forEach(([mId, st]) => {
-        if (st.hasPaid && !st.hasPending) {
-          return;
-        }
-        const mTrxList = g.transactions.filter((t) => (String(t.member?.id) === String(mId) || String((t as any).member_id) === String(mId)));
-        const hasSlip = mTrxList.some((t) => t.status === 'pending' && !!t.receipt_photo);
-        const isRej = mTrxList.some((t) => t.status === 'rejected');
-        if (hasSlip) receivedSlipCount += 1;
-        else if (isRej) rejectedCount += 1;
-        else duePendingCount += 1;
-      });
+      // In subscription demands: all members count as due except the fully paid ones
+      const duePendingCount = Math.max(0, totalMembersAssigned - fullyPaidMembersCount);
 
       return {
         ...g,
@@ -1042,6 +1258,10 @@ export default function AdminReceiptsPage() {
   // Submit Edit Single Transaction
   const handleSaveEditTrx = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEditTrx) {
+      alert('Permission denied. Only Admins can modify transaction amounts.');
+      return;
+    }
     if (!editingTrx) return;
 
     const numAmount = Number(editTrxAmount);
@@ -1070,6 +1290,7 @@ export default function AdminReceiptsPage() {
 
   // Open Edit Group / Demand Price Modal
   const openEditBatchGroup = (group: any) => {
+    if (!canEditTrx) return;
     setEditingGroup(group);
     setEditGroupAmount(String(group.perMemberAmount || ''));
     setEditGroupOnlyUnpaid(true);
@@ -1079,6 +1300,10 @@ export default function AdminReceiptsPage() {
   // Submit Edit Batch Group Price
   const handleSaveEditGroup = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEditTrx) {
+      alert('Permission denied. Only Admins can modify demand prices.');
+      return;
+    }
     if (!editingGroup) return;
 
     const numAmount = Number(editGroupAmount);
@@ -1116,6 +1341,7 @@ export default function AdminReceiptsPage() {
 
   // Open Delete Modal
   const promptDeleteTrx = (itemOrTrx: Transaction | MemberReceiptItem | any) => {
+    if (!canEditTrx) return;
     const trx = itemOrTrx.rawTransaction || itemOrTrx;
     setDeletingTrx(trx);
     setDeletingGroup(null);
@@ -1123,6 +1349,7 @@ export default function AdminReceiptsPage() {
   };
 
   const promptDeleteGroup = (group: any) => {
+    if (!canEditTrx) return;
     setDeletingGroup(group);
     setDeletingTrx(null);
     setOpenDeleteModal(true);
@@ -1130,6 +1357,10 @@ export default function AdminReceiptsPage() {
 
   // Execute Delete
   const handleConfirmDelete = async () => {
+    if (!canEditTrx) {
+      alert('Permission denied. Only Admins can delete transaction records.');
+      return;
+    }
     try {
       if (deletingTrx) {
         await deleteTransaction(deletingTrx.id).unwrap();
@@ -1195,28 +1426,92 @@ export default function AdminReceiptsPage() {
     }
 
     const desc = baseReceipt.transaction?.description || fallbackTrx?.description || '';
-    const isPartialFromDesc = /partial payment/i.test(desc) || /remaining due/i.test(desc);
-    const isPartial = partialMeta?.isPartial ?? isPartialFromDesc;
-
-    // Parse partial amounts from description if available (e.g. "BDT 1000 of BDT 2000", "(Due: BDT 1000)")
-    let parsedAssigned = 0;
-    let parsedDue = 0;
-    const matchTotal = desc.match(/of\s+BDT\s+([\d,]+)/i);
-    if (matchTotal) {
-      parsedAssigned = Number(matchTotal[1].replace(/,/g, ''));
-    }
-    const matchDue = desc.match(/Due:\s*BDT\s*([\d,]+)/i);
-    if (matchDue) {
-      parsedDue = Number(matchDue[1].replace(/,/g, ''));
-    }
-
     const installmentAmount = Number(baseReceipt.amount || 0);
-    const totalPaid = partialMeta?.totalPaidAmount ?? (parsedAssigned && parsedDue ? parsedAssigned - parsedDue : installmentAmount);
-    const totalDue = partialMeta?.totalDueAmount ?? parsedDue;
-    const totalAssigned = partialMeta?.totalAssignedAmount ?? (parsedAssigned || (totalPaid + totalDue));
-    const previousPaid = partialMeta?.previousPaidAmount ?? (totalPaid > installmentAmount ? totalPaid - installmentAmount : 0);
+
+    // Locate the member and find all related transactions for this member and billing cycle
+    const targetTrx = (fallbackTrx || baseReceipt.transaction) as any;
+    const memberId = targetTrx?.member?.id || targetTrx?.member_id || (baseReceipt.member as any)?.id;
+    const targetMonth = targetTrx?.month;
+    const targetTrxNo = targetTrx?.transaction_no;
+
+    const relatedTrxList = rawTransactions.filter((t) => {
+      const mId = t.member?.id || (t as any).member_id;
+      if (mId !== memberId) return false;
+
+      if (targetMonth && t.month) {
+        return t.month.trim().toLowerCase() === targetMonth.trim().toLowerCase();
+      }
+      if (targetTrxNo && t.transaction_no && t.transaction_no === targetTrxNo) {
+        return true;
+      }
+      return false;
+    }).sort((a, b) => {
+      const dateA = a.updated_at || a.created_at || a.transaction_date || '';
+      const dateB = b.updated_at || b.created_at || b.transaction_date || '';
+      return dateA.localeCompare(dateB) || (a.id || 0) - (b.id || 0);
+    });
+
+    const relatedPaidList = relatedTrxList.filter((t) => t.status === 'paid');
+    const relatedPendingList = relatedTrxList.filter((t) => t.status === 'pending');
+
+    const totalPaidSoFar = relatedPaidList.reduce((sum, t) => sum + Number(t.amount || 0), 0);
+    const totalPendingRemaining = relatedPendingList.reduce((sum, t) => sum + Number(t.amount || 0), 0);
+    const totalAssignedTarget = totalPaidSoFar + totalPendingRemaining;
+
+    // Calculate progression up to this specific transaction if paid in multiple installments
+    const currIndex = relatedPaidList.findIndex((t) => t.id === targetTrx?.id || t.transaction_no === targetTrx?.transaction_no);
+    let cumulativeUpToThis = 0;
+    let prevUpToThis = 0;
+    if (currIndex >= 0) {
+      for (let i = 0; i <= currIndex; i++) {
+        cumulativeUpToThis += Number(relatedPaidList[i].amount || 0);
+        if (i < currIndex) {
+          prevUpToThis += Number(relatedPaidList[i].amount || 0);
+        }
+      }
+    } else {
+      cumulativeUpToThis = totalPaidSoFar || installmentAmount;
+      prevUpToThis = Math.max(0, cumulativeUpToThis - installmentAmount);
+    }
+
+    const totalDue = partialMeta?.totalDueAmount !== undefined
+      ? partialMeta.totalDueAmount
+      : (relatedPendingList.length > 0 ? totalPendingRemaining : 0);
+
+    const totalPaid = partialMeta?.totalPaidAmount !== undefined
+      ? partialMeta.totalPaidAmount
+      : cumulativeUpToThis;
+
+    const totalAssigned = partialMeta?.totalAssignedAmount !== undefined
+      ? partialMeta.totalAssignedAmount
+      : (totalAssignedTarget || totalPaid + totalDue);
+
+    const previousPaid = partialMeta?.previousPaidAmount !== undefined
+      ? partialMeta.previousPaidAmount
+      : prevUpToThis;
+
+    // A payment is only partial if there is actually a pending due remaining > 0 and totalAssigned > totalPaid
+    const isPartial = partialMeta?.isPartial !== undefined
+      ? (partialMeta.isPartial && totalDue > 0)
+      : (totalDue > 0 && totalAssigned > totalPaid);
 
     let previousReferences: (string | { ref: string; amount?: number; date?: string })[] = partialMeta?.previousReferences || [];
+    if (previousReferences.length === 0 && relatedPaidList.length > 1) {
+      const prevTrxList = currIndex >= 0 ? relatedPaidList.slice(0, currIndex) : relatedPaidList.slice(0, -1);
+      previousReferences = prevTrxList.map((t) => {
+        let ref = t.member_trx_reference || '';
+        if (!ref && t.description) {
+          const m = t.description.match(/Ref:\s*([^|\n-]+)/i);
+          if (m) ref = m[1].trim();
+        }
+        return {
+          ref: ref || t.transaction_no,
+          amount: Number(t.amount || 0),
+          date: t.transaction_date || '',
+        };
+      }).filter((item) => Boolean(item.ref));
+    }
+
     if (previousReferences.length === 0 && desc) {
       const refMatches = Array.from(desc.matchAll(/Ref:\s*([^|\n-]+)/gi)).map((m) => m[1].trim()).filter(Boolean);
       if (refMatches.length > 1) {
@@ -1238,6 +1533,23 @@ export default function AdminReceiptsPage() {
 
     const demandTrxNo = partialMeta?.demandTrxNo || parentDemandTrxNo || baseReceipt.receipt_no || fallbackTrx?.transaction_no;
 
+    let adminComment =
+      (baseReceipt as any).admin_note ||
+      (baseReceipt as any).accountant_note ||
+      (baseReceipt as any).admin_comment ||
+      (baseReceipt as any).notes ||
+      (targetTrx as any)?.admin_note ||
+      (targetTrx as any)?.accountant_note ||
+      (targetTrx as any)?.notes ||
+      '';
+
+    if (!adminComment && desc) {
+      const match = desc.match(/(?:(?:admin|accountant|officer|staff)\s+)?(?:note|remarks|comment)s?\s*[:\-–—]\s*([^|\n]+)/i);
+      if (match && match[1]) {
+        adminComment = match[1].trim();
+      }
+    }
+
     const enrichedReceipt: Receipt & {
       isPartial?: boolean;
       totalPaidAmount?: number;
@@ -1247,6 +1559,8 @@ export default function AdminReceiptsPage() {
       installmentAmount?: number;
       demandTrxNo?: string;
       previousReferences?: (string | { ref: string; amount?: number; date?: string })[];
+      admin_note?: string;
+      confirmed_by?: any;
     } = {
       ...baseReceipt,
       receipt_no: demandTrxNo || baseReceipt.receipt_no,
@@ -1254,10 +1568,20 @@ export default function AdminReceiptsPage() {
       isPartial,
       totalPaidAmount: totalPaid,
       previousPaidAmount: previousPaid,
-      totalDueAmount: totalDue,
+      totalDueAmount: isPartial ? totalDue : 0,
       totalAssignedAmount: totalAssigned,
       installmentAmount: installmentAmount,
       previousReferences: previousReferences,
+      admin_note: adminComment || (baseReceipt as any).admin_note,
+      confirmed_by:
+        baseReceipt.confirmed_by ||
+        (targetTrx as any)?.confirmed_by ||
+        targetTrx?.last_modified_by ||
+        targetTrx?.updated_by ||
+        (() => {
+          const a = getAuditorInfo(targetTrx || baseReceipt.transaction);
+          return a ? { id: a.id, name: a.name, role: a.role, member_no: a.member_no } : undefined;
+        })(),
     };
 
     setPrintReceipt(enrichedReceipt as any);
@@ -1292,6 +1616,7 @@ export default function AdminReceiptsPage() {
     setPaidAmountInput(defaultAmount);
     setPaymentMethodInput((trx.member_payment_method as any) || 'cash');
     setPaymentDateInput(new Date().toISOString().split('T')[0]);
+    setPaymentTimeInput(getCurrentTimeHM());
     setPaymentTrxRefInput(trx.member_trx_reference || '');
     setPaymentNotesInput(trx.member_comment || '');
     setOpenCollectModal(true);
@@ -1317,6 +1642,7 @@ export default function AdminReceiptsPage() {
       const combinedNotes: string[] = [];
       if (paymentTrxRefInput.trim()) combinedNotes.push(`Ref: ${paymentTrxRefInput.trim()}`);
       if (paymentNotesInput.trim()) combinedNotes.push(`Note: ${paymentNotesInput.trim()}`);
+      if (paymentTimeInput.trim()) combinedNotes.push(`Settlement Time: ${paymentTimeInput.trim()}`);
 
       const res = await collectPayment({
         id: collectingTrx.id,
@@ -1420,6 +1746,12 @@ export default function AdminReceiptsPage() {
       return;
     }
 
+    const trimmedTrxNo = demandTrxNo.trim();
+    if (trimmedTrxNo && isTrxNoDuplicate) {
+      alert(`The Transaction ID "${trimmedTrxNo}" is already in use by another transaction. Please provide a unique Transaction ID or click "Auto Generate".`);
+      return;
+    }
+
     try {
       const res = await generatePayments({
         payment_category: demandCategory,
@@ -1429,14 +1761,14 @@ export default function AdminReceiptsPage() {
         title: demandCategory === 'one_time' ? oneTimeTitle : undefined,
         due_date: demandDueDate,
         description: demandDescription || undefined,
-        transaction_no: demandTrxNo.trim() || undefined,
+        transaction_no: trimmedTrxNo || undefined,
       }).unwrap();
 
       alert(`Success! Generated ${res.count} pending payment demands for members.`);
       setOpenDemand(false);
       setDemandTrxNo('');
     } catch (err: any) {
-      alert(err?.data?.message || 'Failed to generate payment demands.');
+      alert(err?.data?.message || err?.data?.errors?.transaction_no?.[0] || 'Failed to generate payment demands.');
     }
   };
 
@@ -1452,12 +1784,16 @@ export default function AdminReceiptsPage() {
             </p>
           </div>
 
-          {canManage && (
+          {canEditTrx && (
             <div className="flex items-center gap-2.5 flex-wrap">
               <Button
                 onClick={() => {
                   const settingsList = Array.isArray(settings) ? settings : (settings as any)?.data || [];
-                  const defaultFee = settingsList.find((s: any) => s.setting_key === 'payment_amount_1')?.setting_value || '2000';
+                  const defaultFee =
+                    settingsList.find((s: any) => s.setting_key === 'monthly_subscription_default')?.setting_value ||
+                    settingsList.find((s: any) => s.setting_key === 'payment_amount_1')?.setting_value ||
+                    '2000';
+                  setDemandCategory('monthly_payment');
                   setDemandAmount(defaultFee);
                   setTargetAllMembers(true);
                   setSelectedMemberId('');
@@ -1507,7 +1843,7 @@ export default function AdminReceiptsPage() {
 
           <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-blue-700 uppercase">Received Slips</span>
+              <span className="text-xs font-bold text-blue-700 uppercase">Receipts Received</span>
               <FileCheck className="h-4 w-4 text-blue-600" />
             </div>
             <p className="text-xl font-extrabold text-blue-800 mt-1.5">
@@ -1626,7 +1962,7 @@ export default function AdminReceiptsPage() {
                       : 'bg-blue-50 text-blue-800 hover:bg-blue-100'
                   }`}
                 >
-                  <FileCheck className="h-3 w-3" /> Slips ({stats.currentReceivedCount})
+                  <FileCheck className="h-3 w-3" /> Receipts Received ({stats.currentReceivedCount})
                 </button>
                 <button
                   onClick={() => setStatusFilter('pending')}
@@ -1636,7 +1972,7 @@ export default function AdminReceiptsPage() {
                       : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
                   }`}
                 >
-                  <Clock className="h-3 w-3" /> Dues ({stats.pureUnpaidDueCount})
+                  <Clock className="h-3 w-3" /> Dues ({stats.currentDueCount})
                 </button>
                 <button
                   onClick={() => setStatusFilter('rejected')}
@@ -1747,8 +2083,8 @@ export default function AdminReceiptsPage() {
                               </TableCell>
 
                               <TableCell className="px-3 py-3.5">
-                                <div className="flex flex-col">
-                                  <div className="flex items-center gap-1.5">
+                                <div className="flex flex-col gap-0.5">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
                                     <span className="font-bold text-slate-800 text-xs truncate">{modifier.name}</span>
                                     <Badge
                                       variant="outline"
@@ -1761,9 +2097,16 @@ export default function AdminReceiptsPage() {
                                       {modifier.role?.replace(/_/g, ' ')}
                                     </Badge>
                                   </div>
-                                  <span className="text-[10px] text-slate-500">
-                                    {modifier.action} entry
-                                  </span>
+                                  <div className="flex flex-col text-[10px] text-slate-500 leading-tight">
+                                    <span className="font-medium text-slate-700">
+                                      {modifier.action} entry
+                                    </span>
+                                    {modifier.date && (
+                                      <span className="text-slate-500 font-mono text-[10px]">
+                                        {formatDateTime(modifier.date)}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                               </TableCell>
 
@@ -1886,7 +2229,7 @@ export default function AdminReceiptsPage() {
                                 ) : (
                                   <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
                                     <Clock className="h-3.5 w-3.5 text-amber-600" />
-                                    Pending ({group.pendingCount} Unpaid)
+                                    Pending ({group.duePendingCount} Due)
                                   </span>
                                 )}
                               </TableCell>
@@ -1897,7 +2240,7 @@ export default function AdminReceiptsPage() {
 
                               <TableCell className="px-3 py-3.5 text-right whitespace-nowrap">
                                 <div className="flex items-center justify-end gap-1.5">
-                                  {canManage && (
+                                  {canEditTrx && (
                                     <>
                                       <Button
                                         size="sm"
@@ -1959,7 +2302,7 @@ export default function AdminReceiptsPage() {
                                             <TableHead className="w-[14%] text-center">Member Name</TableHead>
                                             <TableHead className="w-[10%] text-center">Member ID</TableHead>
                                             <TableHead className="w-[10%] text-center">Date</TableHead>
-                                            <TableHead className="w-[14%] text-center">Receipt / Trx No</TableHead>
+                                            <TableHead className="w-[14%] text-center">Reference ID</TableHead>
                                             <TableHead className="w-[12%] text-center">Amount</TableHead>
                                             <TableHead className="w-[12%] text-center">Receipt Proof</TableHead>
                                             <TableHead className="w-[12%] text-center">Status</TableHead>
@@ -1978,37 +2321,37 @@ export default function AdminReceiptsPage() {
                                             });
 
                                             const memberRows = Object.entries(memberTrxMap).map(([mId, trxList]) => {
-                                              const sorted = [...trxList].sort((a, b) => {
-                                                const dateA = a.updated_at || a.created_at || a.transaction_date || '';
-                                                const dateB = b.updated_at || b.created_at || b.transaction_date || '';
-                                                return dateB.localeCompare(dateA) || (b.id || 0) - (a.id || 0);
+                                              const chronologicalList = [...trxList].sort((a, b) => {
+                                                const dateA = a.created_at || a.updated_at || a.transaction_date || '';
+                                                const dateB = b.created_at || b.updated_at || b.transaction_date || '';
+                                                return dateA.localeCompare(dateB) || (Number(a.id) || 0) - (Number(b.id) || 0);
                                               });
 
-                                              const paidList = sorted.filter((t) => t.status === 'paid');
-                                              const pendingList = sorted.filter((t) => t.status === 'pending');
-                                              const rejectedList = sorted.filter((t) => t.status === 'rejected');
+                                              const paidList = chronologicalList.filter((t) => t.status === 'paid');
+                                              const pendingList = chronologicalList.filter((t) => t.status === 'pending');
+                                              const rejectedList = chronologicalList.filter((t) => t.status === 'rejected');
                                               const totalPaidAmount = paidList.reduce((sum, t) => sum + Number(t.amount || 0), 0);
                                               const totalDueAmount = pendingList.reduce((sum, t) => sum + Number(t.amount || 0), 0);
-                                              const primaryTrx = pendingList[0] || sorted[0];
+                                              const primaryTrx = pendingList[pendingList.length - 1] || chronologicalList[chronologicalList.length - 1] || chronologicalList[0];
                                               const isPartial = paidList.length > 0 && pendingList.length > 0;
                                               const isFullyPaid = paidList.length > 0 && pendingList.length === 0;
                                               const isSlipReceived = !isFullyPaid && pendingList.some((t) => !!t.receipt_photo);
-                                              const isRejectedActive = !isFullyPaid && !isPartial && !isSlipReceived && rejectedList.length > 0;
+                                              const isRejectedActive = !isFullyPaid && !isSlipReceived && rejectedList.length > 0;
 
                                               let currentBatchStatus: 'cleared' | 'partial' | 'received_slip' | 'due' | 'rejected' = 'due';
                                               if (isFullyPaid) currentBatchStatus = 'cleared';
-                                              else if (isPartial) currentBatchStatus = 'partial';
                                               else if (isSlipReceived) currentBatchStatus = 'received_slip';
                                               else if (isRejectedActive) currentBatchStatus = 'rejected';
+                                              else if (isPartial) currentBatchStatus = 'partial';
                                               else currentBatchStatus = 'due';
 
-                                              const latestWithPhoto = sorted.find((t) => t.receipt_photo);
+                                              const latestWithPhoto = [...chronologicalList].reverse().find((t) => t.receipt_photo);
 
                                               return {
                                                 memberId: mId,
-                                                memberName: primaryTrx.member?.name ?? '-',
-                                                memberNo: primaryTrx.member?.member_no || (primaryTrx.member as any)?.member_profile?.member_no || 'Unassigned',
-                                                transactions: sorted,
+                                                memberName: primaryTrx?.member?.name ?? '-',
+                                                memberNo: primaryTrx?.member?.member_no || (primaryTrx?.member as any)?.member_profile?.member_no || 'Unassigned',
+                                                transactions: chronologicalList,
                                                 paidList,
                                                 pendingList,
                                                 rejectedList,
@@ -2059,6 +2402,8 @@ export default function AdminReceiptsPage() {
                                             return memberRows.map((mGroup) => {
                                               const expandKey = `${group.key}___mem_${mGroup.memberId}`;
                                               const isExpanded = !!expandedGroups[expandKey];
+                                              const latestPaidTrx = mGroup.paidList[mGroup.paidList.length - 1];
+                                              const latestRejectedTrx = mGroup.rejectedList[mGroup.rejectedList.length - 1];
 
                                               return (
                                                 <React.Fragment key={expandKey}>
@@ -2083,14 +2428,100 @@ export default function AdminReceiptsPage() {
                                                       {mGroup.memberNo}
                                                     </TableCell>
 
-                                                    <TableCell className="p-3 align-middle text-center text-slate-600 whitespace-nowrap">
-                                                      {mGroup.primaryTrx.transaction_date}
+                                                    <TableCell className="p-3 align-middle text-center text-slate-600">
+                                                      {mGroup.isRejectedActive || mGroup.currentBatchStatus === 'rejected' ? (
+                                                        <div className="flex flex-col items-center gap-0.5">
+                                                          <span className="font-bold text-rose-700 text-xs flex items-center gap-1">
+                                                            <XCircle className="h-3 w-3 inline text-rose-600 shrink-0" />
+                                                            <span>Rejected: {formatDateTime(latestRejectedTrx?.updated_at || latestRejectedTrx?.created_at)}</span>
+                                                          </span>
+                                                          {mGroup.latestPhotoTrx?.receipt_photo_uploaded_at && (
+                                                            <span className="text-[10px] text-slate-500 font-medium">
+                                                              Received / Slip: {formatDateTime(mGroup.latestPhotoTrx.receipt_photo_uploaded_at)}
+                                                            </span>
+                                                          )}
+                                                          <span className="text-[10px] text-slate-400 font-medium">
+                                                            Due: {mGroup.primaryTrx.transaction_date}
+                                                          </span>
+                                                        </div>
+                                                      ) : mGroup.isFullyPaid ? (
+                                                        <div className="flex flex-col items-center gap-0.5">
+                                                          <span className="font-bold text-emerald-800 text-xs flex items-center gap-1">
+                                                            <CheckCircle2 className="h-3 w-3 text-emerald-600 inline shrink-0" />
+                                                            <span>Settled: {formatDateTime(latestPaidTrx?.updated_at || latestPaidTrx?.created_at || mGroup.primaryTrx.transaction_date)}</span>
+                                                          </span>
+                                                          {mGroup.latestPhotoTrx?.receipt_photo_uploaded_at && (
+                                                            <span className="text-[10px] text-blue-700 font-medium">
+                                                              Received / Slip: {formatDateTime(mGroup.latestPhotoTrx.receipt_photo_uploaded_at)}
+                                                            </span>
+                                                          )}
+                                                          <span className="text-[10px] text-slate-400 font-medium">
+                                                            Due: {mGroup.primaryTrx.transaction_date}
+                                                          </span>
+                                                        </div>
+                                                      ) : mGroup.isPartial ? (
+                                                        <div className="flex flex-col items-center gap-0.5">
+                                                          <span className="font-bold text-purple-900 text-xs flex items-center gap-1">
+                                                            <Wallet className="h-3 w-3 text-purple-700 inline shrink-0" />
+                                                            <span>Settled: {formatDateTime(latestPaidTrx?.updated_at || latestPaidTrx?.created_at)}</span>
+                                                          </span>
+                                                          {mGroup.latestPhotoTrx?.receipt_photo_uploaded_at && (
+                                                            <span className="text-[10px] text-blue-700 font-medium">
+                                                              Received / Slip: {formatDateTime(mGroup.latestPhotoTrx.receipt_photo_uploaded_at)}
+                                                            </span>
+                                                          )}
+                                                          <span className="text-[10px] text-slate-400 font-medium">
+                                                            Due: {mGroup.primaryTrx.transaction_date}
+                                                          </span>
+                                                        </div>
+                                                      ) : mGroup.isSlipReceived ? (
+                                                        <div className="flex flex-col items-center gap-0.5">
+                                                          <span className="font-bold text-blue-800 text-xs flex items-center gap-1">
+                                                            <FileCheck className="h-3 w-3 text-blue-600 inline shrink-0" />
+                                                            <span>Received / Slip: {formatDateTime(mGroup.latestPhotoTrx?.receipt_photo_uploaded_at || mGroup.primaryTrx.updated_at)}</span>
+                                                          </span>
+                                                          <span className="text-[10px] text-amber-700 font-medium italic">
+                                                            Settlement: Pending Collection
+                                                          </span>
+                                                          <span className="text-[10px] text-slate-400 font-medium">
+                                                            Due: {mGroup.primaryTrx.transaction_date}
+                                                          </span>
+                                                        </div>
+                                                      ) : (
+                                                        <div className="flex flex-col items-center gap-0.5">
+                                                          <span className="font-medium text-slate-700 text-xs">
+                                                            Due: {mGroup.primaryTrx.transaction_date}
+                                                          </span>
+                                                          {mGroup.primaryTrx.created_at && (
+                                                            <span className="text-[10px] text-slate-400 font-medium">
+                                                              Demand Issued: {formatDateTime(mGroup.primaryTrx.created_at)}
+                                                            </span>
+                                                          )}
+                                                        </div>
+                                                      )}
                                                     </TableCell>
 
                                                     <TableCell className="p-3 align-middle text-center font-mono font-bold text-slate-700">
-                                                      {mGroup.isRejectedActive || mGroup.currentBatchStatus === 'rejected'
-                                                        ? '-'
-                                                        : extractInputtedReference(mGroup.primaryTrx, mGroup.primaryTrx.receipt) || mGroup.primaryTrx.transaction_no || '-'}
+                                                      {mGroup.isRejectedActive || mGroup.currentBatchStatus === 'rejected' ? (
+                                                        <span className="text-slate-400 font-normal">-</span>
+                                                      ) : mGroup.isFullyPaid || mGroup.isPartial ? (
+                                                        (() => {
+                                                          const paidRct = latestPaidTrx?.receipt || mGroup.primaryTrx.receipt;
+                                                          const refId = extractInputtedReference(latestPaidTrx || mGroup.primaryTrx, paidRct);
+                                                          return <span className="font-bold text-slate-800 font-mono">{refId || '-'}</span>;
+                                                        })()
+                                                      ) : mGroup.isSlipReceived ? (
+                                                        (() => {
+                                                          const ref = mGroup.latestPhotoTrx?.member_trx_reference;
+                                                          return ref ? (
+                                                            <span className="font-mono text-slate-800 font-bold">{ref}</span>
+                                                          ) : (
+                                                            <span className="text-[10px] text-blue-700 italic font-medium">Slip Submitted</span>
+                                                          );
+                                                        })()
+                                                      ) : (
+                                                        <span className="text-slate-400 font-normal">-</span>
+                                                      )}
                                                     </TableCell>
 
                                                     <TableCell className="p-3 align-middle text-center font-bold text-slate-900 whitespace-nowrap">
@@ -2114,7 +2545,7 @@ export default function AdminReceiptsPage() {
                                                           <ReceiptSlipThumbnail
                                                             photoUrl={mGroup.latestPhotoTrx.receipt_photo}
                                                             title={`${mGroup.memberName} - ${group.title}`}
-                                                            date={mGroup.latestPhotoTrx.receipt_photo_uploaded_at ? `Uploaded: ${mGroup.latestPhotoTrx.receipt_photo_uploaded_at}` : undefined}
+                                                            date={mGroup.latestPhotoTrx.receipt_photo_uploaded_at ? `Uploaded: ${formatDateTime(mGroup.latestPhotoTrx.receipt_photo_uploaded_at)}` : undefined}
                                                             isRejected={mGroup.isRejectedActive}
                                                             isPartial={mGroup.isPartial}
                                                             isSlipReceived={mGroup.isSlipReceived}
@@ -2137,21 +2568,30 @@ export default function AdminReceiptsPage() {
 
                                                     <TableCell className="p-3 align-middle text-center">
                                                       {mGroup.isFullyPaid ? (
-                                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 whitespace-nowrap shadow-2xs">
-                                                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> Paid
-                                                        </span>
-                                                      ) : mGroup.isPartial ? (
-                                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-purple-50 text-purple-800 border border-purple-300 whitespace-nowrap shadow-2xs">
-                                                          <Wallet className="h-3.5 w-3.5 text-purple-600" /> Partially Paid
-                                                        </span>
+                                                        <div className="flex flex-col items-center justify-center">
+                                                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 whitespace-nowrap shadow-2xs">
+                                                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> Paid
+                                                          </span>
+                                                          {renderStaffAuditBadge(getAuditorInfo(latestPaidTrx || mGroup.primaryTrx), true)}
+                                                        </div>
                                                       ) : mGroup.isSlipReceived ? (
                                                         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-300 whitespace-nowrap shadow-2xs">
-                                                          <FileCheck className="h-3.5 w-3.5 text-blue-600" /> Received Slip
+                                                          <FileCheck className="h-3.5 w-3.5 text-blue-600" /> Receipt Received
                                                         </span>
+                                                      ) : mGroup.isPartial ? (
+                                                        <div className="flex flex-col items-center justify-center">
+                                                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-purple-50 text-purple-800 border border-purple-300 whitespace-nowrap shadow-2xs">
+                                                            <Wallet className="h-3.5 w-3.5 text-purple-600" /> Partially Paid
+                                                          </span>
+                                                          {renderStaffAuditBadge(getAuditorInfo(latestPaidTrx || mGroup.primaryTrx), true)}
+                                                        </div>
                                                       ) : mGroup.isRejectedActive ? (
-                                                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-red-50 text-red-800 border border-red-300 whitespace-nowrap shadow-2xs">
-                                                          <XCircle className="h-3.5 w-3.5 text-red-600" /> Slip Rejected
-                                                        </span>
+                                                        <div className="flex flex-col items-center justify-center">
+                                                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-red-50 text-red-800 border border-red-300 whitespace-nowrap shadow-2xs">
+                                                            <XCircle className="h-3.5 w-3.5 text-red-600" /> Slip Rejected
+                                                          </span>
+                                                          {renderStaffAuditBadge(getAuditorInfo(latestRejectedTrx || mGroup.primaryTrx), false)}
+                                                        </div>
                                                       ) : (
                                                         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300 whitespace-nowrap shadow-2xs">
                                                           <Clock className="h-3.5 w-3.5 text-amber-600" /> Due Pending
@@ -2168,7 +2608,7 @@ export default function AdminReceiptsPage() {
                                                             onClick={() => {
                                                               const rootDemandTrx = mGroup.transactions.find((t) => !t.description || !/partial payment/i.test(t.description)) || mGroup.transactions[mGroup.transactions.length - 1] || mGroup.primaryTrx;
                                                               const rootTrxNo = group.transaction_no || rootDemandTrx?.transaction_no || mGroup.primaryTrx?.transaction_no;
-                                                              handlePrint(mGroup.paidList[0]?.receipt, rootDemandTrx || mGroup.paidList[0], {
+                                                              handlePrint(latestPaidTrx?.receipt, rootDemandTrx || latestPaidTrx || mGroup.primaryTrx, {
                                                                 isPartial: mGroup.isPartial,
                                                                 totalPaidAmount: mGroup.totalPaidAmount,
                                                                 totalDueAmount: mGroup.totalDueAmount,
@@ -2252,8 +2692,50 @@ export default function AdminReceiptsPage() {
                                                                       <TableCell className="p-2 text-center font-medium text-slate-700">
                                                                         {histTrx.description || histTrx.month || 'Monthly Subscription'}
                                                                       </TableCell>
-                                                                      <TableCell className="p-2 text-center text-slate-500 whitespace-nowrap">
-                                                                        {histTrx.transaction_date}
+                                                                      <TableCell className="p-2 text-center text-slate-500">
+                                                                        {isHistRejected ? (
+                                                                          <div className="flex flex-col items-center gap-0.5">
+                                                                            <span className="font-bold text-rose-700 text-[11px] flex items-center gap-1">
+                                                                              <XCircle className="h-3 w-3 inline text-rose-600 shrink-0" />
+                                                                              <span>Rejected: {formatDateTime(histTrx.updated_at || histTrx.created_at)}</span>
+                                                                            </span>
+                                                                            {histTrx.receipt_photo_uploaded_at && (
+                                                                              <span className="text-[9px] text-slate-500 font-medium">
+                                                                                Received / Slip: {formatDateTime(histTrx.receipt_photo_uploaded_at)}
+                                                                              </span>
+                                                                            )}
+                                                                            <span className="text-[9px] text-slate-400">Due: {histTrx.transaction_date}</span>
+                                                                          </div>
+                                                                        ) : isHistPaid ? (
+                                                                          <div className="flex flex-col items-center gap-0.5">
+                                                                            <span className="font-bold text-emerald-800 text-[11px] flex items-center gap-1">
+                                                                              <CheckCircle2 className="h-3 w-3 inline text-emerald-600 shrink-0" />
+                                                                              <span>Settled: {formatDateTime(histTrx.updated_at || histTrx.transaction_date)}</span>
+                                                                            </span>
+                                                                            {histTrx.receipt_photo_uploaded_at && (
+                                                                              <span className="text-[9px] text-blue-700 font-medium">
+                                                                                Received / Slip: {formatDateTime(histTrx.receipt_photo_uploaded_at)}
+                                                                              </span>
+                                                                            )}
+                                                                            <span className="text-[9px] text-slate-400">Due: {histTrx.transaction_date}</span>
+                                                                          </div>
+                                                                        ) : isHistSlipReceived ? (
+                                                                          <div className="flex flex-col items-center gap-0.5">
+                                                                            <span className="font-bold text-blue-800 text-[11px] flex items-center gap-1">
+                                                                              <FileCheck className="h-3 w-3 inline text-blue-600 shrink-0" />
+                                                                              <span>Received / Slip: {formatDateTime(histTrx.receipt_photo_uploaded_at || histTrx.updated_at)}</span>
+                                                                            </span>
+                                                                            <span className="text-[9px] text-amber-700 italic">Settlement: Pending</span>
+                                                                            <span className="text-[9px] text-slate-400">Due: {histTrx.transaction_date}</span>
+                                                                          </div>
+                                                                        ) : (
+                                                                          <div className="flex flex-col items-center gap-0.5">
+                                                                            <span className="font-medium text-slate-700 text-[11px]">Due: {histTrx.transaction_date}</span>
+                                                                            {histTrx.created_at && (
+                                                                              <span className="text-[9px] text-slate-400">Demand: {formatDateTime(histTrx.created_at)}</span>
+                                                                            )}
+                                                                          </div>
+                                                                        )}
                                                                       </TableCell>
                                                                       <TableCell className="p-2 text-center font-bold text-slate-900 whitespace-nowrap">
                                                                         {isHistRemainingDue && histTrx.status === 'pending' ? (
@@ -2268,7 +2750,13 @@ export default function AdminReceiptsPage() {
                                                                             <ReceiptSlipThumbnail
                                                                               photoUrl={histTrx.receipt_photo}
                                                                               title={`${mGroup.memberName} - ${histTrx.month || histTrx.description || 'Receipt'}`}
-                                                                              date={histTrx.receipt_photo_uploaded_at ? `Uploaded: ${histTrx.receipt_photo_uploaded_at}` : undefined}
+                                                                              date={
+                                                                                isHistRejected
+                                                                                  ? `Rejected: ${formatDateTime(histTrx.updated_at || histTrx.created_at)}`
+                                                                                  : histTrx.receipt_photo_uploaded_at
+                                                                                  ? `Uploaded: ${formatDateTime(histTrx.receipt_photo_uploaded_at)}`
+                                                                                  : undefined
+                                                                              }
                                                                               isRejected={isHistRejected}
                                                                               isPartial={isHistPartialPaid || Boolean(isHistRemainingDue)}
                                                                               isSlipReceived={isHistSlipReceived}
@@ -2276,7 +2764,9 @@ export default function AdminReceiptsPage() {
                                                                               onClick={() => viewReceiptPhoto(
                                                                                 histTrx.receipt_photo!,
                                                                                 `${mGroup.memberName} - ${histTrx.month || histTrx.description || 'Receipt'}`,
-                                                                                histTrx.receipt_photo_uploaded_at,
+                                                                                isHistRejected
+                                                                                  ? (histTrx.updated_at || histTrx.created_at || histTrx.receipt_photo_uploaded_at)
+                                                                                  : histTrx.receipt_photo_uploaded_at,
                                                                                 isHistRejected,
                                                                                 histTrx.rejection_reason
                                                                               )}
@@ -2302,7 +2792,7 @@ export default function AdminReceiptsPage() {
                                                                           </span>
                                                                         ) : isHistSlipReceived ? (
                                                                           <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[9px] font-bold bg-blue-50 text-blue-800 border border-blue-300 whitespace-nowrap">
-                                                                            <FileCheck className="h-2.5 w-2.5 text-blue-600" /> Slip Received
+                                                                            <FileCheck className="h-2.5 w-2.5 text-blue-600" /> Receipt Received
                                                                           </span>
                                                                         ) : isHistRejected ? (
                                                                           <div className="flex flex-col items-center">
@@ -2372,7 +2862,7 @@ export default function AdminReceiptsPage() {
                                                                                     const rootDemandTrx = mGroup.transactions.find((t) => !t.description || !/partial payment/i.test(t.description)) || mGroup.transactions[mGroup.transactions.length - 1] || mGroup.primaryTrx;
                                                                                     const rootTrxNo = group.transaction_no || rootDemandTrx?.transaction_no;
                                                                                     handlePrint(histLinkedReceipt, histTrx, {
-                                                                                      isPartial: mGroup.isPartial || isHistPartialPaid,
+                                                                                      isPartial: dueRemainingAfterThis > 0 && totalTarget > cumulativeUpToThis,
                                                                                       totalPaidAmount: cumulativeUpToThis,
                                                                                       previousPaidAmount: prevUpToThis,
                                                                                       totalDueAmount: dueRemainingAfterThis,
@@ -2562,7 +3052,7 @@ export default function AdminReceiptsPage() {
                                 )}
                                 {group.receivedSlipCount > 0 && (
                                   <span className="text-blue-700 font-bold border-l border-slate-300 pl-2">
-                                    {group.receivedSlipCount} Received Slip{group.receivedSlipCount !== 1 ? 's' : ''}
+                                    {group.receivedSlipCount} Receipt{group.receivedSlipCount !== 1 ? 's' : ''} Received
                                   </span>
                                 )}
                                 {group.pureDuePendingCount > 0 && (
@@ -2584,7 +3074,7 @@ export default function AdminReceiptsPage() {
                                   <TableRow className="text-xs">
                                     <TableHead className="w-[10%] text-center">Member ID</TableHead>
                                     <TableHead className="w-[10%] text-center">Date</TableHead>
-                                    <TableHead className="w-[15%] text-center">Transaction No</TableHead>
+                                    <TableHead className="w-[15%] text-center">Reference ID</TableHead>
                                     <TableHead className="w-[12%] text-center">Amount</TableHead>
                                     <TableHead className="w-[13%] text-center">Receipt Proof</TableHead>
                                     <TableHead className="w-[14%] text-center">Status</TableHead>
@@ -2620,8 +3110,20 @@ export default function AdminReceiptsPage() {
                                         <TableCell className="p-3 align-middle text-center text-slate-600 font-medium whitespace-nowrap">
                                           {item.date}
                                         </TableCell>
-                                        <TableCell className="p-3 align-middle text-center font-mono text-slate-700 font-bold text-[11px] truncate">
-                                          {item.inputtedReference || item.transactionNo || '-'}
+                                        <TableCell className="p-3 align-middle text-center font-mono font-bold text-slate-700 text-[11px] truncate">
+                                           {item.status === 'rejected' || item.isRejected ? (
+                                             <span className="text-slate-400 font-normal">-</span>
+                                           ) : item.status === 'paid' || item.recordType === 'receipt' || (item.isPartial && item.rawReceipt) ? (
+                                             <span className="font-bold text-slate-800 font-mono">{item.inputtedReference || item.receiptNo || item.transactionNo || '-'}</span>
+                                           ) : item.receiptPhoto ? (
+                                             item.memberTrxReference ? (
+                                               <span className="font-mono text-slate-800 font-bold">{item.memberTrxReference}</span>
+                                             ) : (
+                                               <span className="text-[10px] text-blue-700 italic font-medium">Slip Submitted</span>
+                                             )
+                                           ) : (
+                                             <span className="text-slate-400 font-normal">-</span>
+                                           )}
                                         </TableCell>
                                         <TableCell className="p-3 align-middle text-center font-bold text-slate-900 whitespace-nowrap">
                                           BDT {item.amount.toLocaleString()}
@@ -2663,6 +3165,13 @@ export default function AdminReceiptsPage() {
                                                   <Wallet className="h-3.5 w-3.5 text-purple-600" /> Partially Paid
                                                 </span>
                                                 <span className="text-[9px] text-purple-700 font-semibold">Partial Payment</span>
+                                                {renderStaffAuditBadge(getAuditorInfo(item), true)}
+                                              </div>
+                                            ) : item.receiptPhoto ? (
+                                              <div className="flex justify-center">
+                                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-300 whitespace-nowrap shadow-2xs">
+                                                  <FileCheck className="h-3.5 w-3.5 text-blue-600" /> Receipt Received
+                                                </span>
                                               </div>
                                             ) : (
                                               <div className="flex flex-col items-center justify-center gap-0.5">
@@ -2673,15 +3182,16 @@ export default function AdminReceiptsPage() {
                                               </div>
                                             )
                                           ) : item.status === 'paid' ? (
-                                            <div className="flex justify-center">
+                                            <div className="flex flex-col items-center justify-center">
                                               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 whitespace-nowrap shadow-2xs">
                                                 <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> Paid
                                               </span>
+                                              {renderStaffAuditBadge(getAuditorInfo(item), true)}
                                             </div>
                                           ) : isPendingDue && item.receiptPhoto ? (
                                             <div className="flex justify-center">
                                               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-300 whitespace-nowrap shadow-2xs">
-                                                <FileCheck className="h-3.5 w-3.5 text-blue-600" /> Slip Received
+                                                <FileCheck className="h-3.5 w-3.5 text-blue-600" /> Receipt Received
                                               </span>
                                             </div>
                                           ) : isRejected ? (
@@ -2689,6 +3199,7 @@ export default function AdminReceiptsPage() {
                                               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-red-50 text-red-800 border border-red-300 whitespace-nowrap shadow-2xs">
                                                 <XCircle className="h-3.5 w-3.5 text-red-600" /> Rejected
                                               </span>
+                                              {renderStaffAuditBadge(getAuditorInfo(item), false)}
                                             </div>
                                           ) : (
                                             <div className="flex justify-center">
@@ -2773,7 +3284,7 @@ export default function AdminReceiptsPage() {
                       <TableHead className="w-[12%] text-center font-semibold text-slate-700">Member Name</TableHead>
                       <TableHead className="w-[10%] text-center font-semibold text-slate-700">Member ID</TableHead>
                       <TableHead className="w-[11%] text-center font-semibold text-slate-700">Date</TableHead>
-                      <TableHead className="w-[14%] text-center font-semibold text-slate-700">Receipt / Trx No</TableHead>
+                      <TableHead className="w-[14%] text-center font-semibold text-slate-700">Reference ID</TableHead>
                       <TableHead className="w-[12%] text-center font-semibold text-slate-700">Amount</TableHead>
                       <TableHead className="w-[12%] text-center font-semibold text-slate-700">Receipt Photo / Proof</TableHead>
                       <TableHead className="w-[13%] text-center font-semibold text-slate-700">Status</TableHead>
@@ -2804,9 +3315,19 @@ export default function AdminReceiptsPage() {
                               {item.date}
                             </TableCell>
                             <TableCell className="p-3 align-middle text-center font-mono font-bold text-slate-700">
-                              {isRejected || item.isRejected || item.status === 'rejected'
-                                ? '-'
-                                : item.inputtedReference || item.transactionNo || '-'}
+                               {item.isRejected || item.status === 'rejected' ? (
+                                 <span className="text-slate-400 font-normal">-</span>
+                               ) : item.status === 'paid' || item.recordType === 'receipt' || (item.isPartial && item.rawReceipt) ? (
+                                 <span className="font-bold text-slate-800 font-mono">{item.inputtedReference || item.receiptNo || item.transactionNo || '-'}</span>
+                               ) : item.receiptPhoto ? (
+                                 item.memberTrxReference ? (
+                                   <span className="font-mono text-slate-800 font-bold">{item.memberTrxReference}</span>
+                                 ) : (
+                                   <span className="text-[10px] text-blue-700 italic font-medium">Slip Submitted</span>
+                                 )
+                               ) : (
+                                 <span className="text-slate-400 font-normal">-</span>
+                               )}
                             </TableCell>
                             <TableCell className="p-3 align-middle text-center font-bold text-slate-900 whitespace-nowrap">
                               BDT {item.amount.toLocaleString()}
@@ -2847,6 +3368,13 @@ export default function AdminReceiptsPage() {
                                       <Wallet className="h-3 w-3 text-purple-600" /> Partially Paid
                                     </span>
                                     <span className="text-[9px] text-purple-700 font-semibold">Partial Payment</span>
+                                    {renderStaffAuditBadge(getAuditorInfo(item), true)}
+                                  </div>
+                                ) : item.receiptPhoto ? (
+                                  <div className="flex justify-center">
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-300 whitespace-nowrap">
+                                      <FileCheck className="h-3 w-3 text-blue-600" /> Receipt Received
+                                    </span>
                                   </div>
                                 ) : (
                                   <div className="flex flex-col items-center justify-center gap-0.5">
@@ -2857,9 +3385,16 @@ export default function AdminReceiptsPage() {
                                   </div>
                                 )
                               ) : item.status === 'paid' ? (
-                                <div className="flex justify-center">
+                                <div className="flex flex-col items-center justify-center">
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 whitespace-nowrap">
                                     <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Paid
+                                  </span>
+                                  {renderStaffAuditBadge(getAuditorInfo(item), true)}
+                                </div>
+                              ) : isPendingDue && item.receiptPhoto ? (
+                                <div className="flex justify-center">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-300 whitespace-nowrap">
+                                    <FileCheck className="h-3 w-3 text-blue-600" /> Receipt Received
                                   </span>
                                 </div>
                               ) : isPendingDue ? (
@@ -2873,12 +3408,14 @@ export default function AdminReceiptsPage() {
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-50 text-red-800 border border-red-300 whitespace-nowrap">
                                     <XCircle className="h-3 w-3 text-red-600" /> Rejected
                                   </span>
+                                  {renderStaffAuditBadge(getAuditorInfo(item), false)}
                                 </div>
                               ) : (
-                                <div className="flex justify-center">
+                                <div className="flex flex-col items-center justify-center">
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 whitespace-nowrap">
                                     <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Paid
                                   </span>
+                                  {renderStaffAuditBadge(getAuditorInfo(item), true)}
                                 </div>
                               )}
                             </TableCell>
@@ -2947,7 +3484,15 @@ export default function AdminReceiptsPage() {
               <div className="grid grid-cols-2 gap-3 p-1.5 bg-slate-100 rounded-lg">
                 <button
                   type="button"
-                  onClick={() => setDemandCategory('monthly_payment')}
+                  onClick={() => {
+                    setDemandCategory('monthly_payment');
+                    const settingsList = Array.isArray(settings) ? settings : (settings as any)?.data || [];
+                    const defaultMonthly =
+                      settingsList.find((s: any) => s.setting_key === 'monthly_subscription_default')?.setting_value ||
+                      settingsList.find((s: any) => s.setting_key === 'payment_amount_1')?.setting_value ||
+                      '2000';
+                    setDemandAmount(defaultMonthly);
+                  }}
                   className={`py-2 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                     demandCategory === 'monthly_payment'
                       ? 'bg-white text-emerald-800 shadow-xs'
@@ -2960,7 +3505,15 @@ export default function AdminReceiptsPage() {
 
                 <button
                   type="button"
-                  onClick={() => setDemandCategory('one_time')}
+                  onClick={() => {
+                    setDemandCategory('one_time');
+                    const settingsList = Array.isArray(settings) ? settings : (settings as any)?.data || [];
+                    const defaultOneTime =
+                      settingsList.find((s: any) => s.setting_key === 'one_time_payment_default')?.setting_value ||
+                      settingsList.find((s: any) => s.setting_key === 'payment_amount_2')?.setting_value ||
+                      '3000';
+                    setDemandAmount(defaultOneTime);
+                  }}
                   className={`py-2 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                     demandCategory === 'one_time'
                       ? 'bg-white text-emerald-800 shadow-xs'
@@ -3148,7 +3701,7 @@ export default function AdminReceiptsPage() {
 
               <div>
                 <div className="flex items-center justify-between">
-                  <Label className="text-xs text-slate-600">Custom Transaction No (Optional)</Label>
+                  <Label className="text-xs font-bold text-slate-800">Custom Transaction ID / No (Optional)</Label>
                   <button
                     type="button"
                     onClick={generateAutoTrxNo}
@@ -3161,8 +3714,24 @@ export default function AdminReceiptsPage() {
                   placeholder="e.g. TRX-20250101-1001 (Leave blank for auto)"
                   value={demandTrxNo}
                   onChange={(e) => setDemandTrxNo(e.target.value)}
-                  className="bg-white mt-1 text-xs font-mono"
+                  className={`mt-1 text-xs font-mono transition-colors ${
+                    isTrxNoDuplicate
+                      ? 'border-rose-500 ring-2 ring-rose-500/30 text-rose-900 bg-rose-50/50'
+                      : 'bg-white'
+                  }`}
                 />
+                {isTrxNoDuplicate ? (
+                  <div className="mt-1.5 p-2 rounded-lg bg-rose-50 border border-rose-200 flex items-start gap-1.5 text-xs text-rose-700 font-medium">
+                    <AlertCircle className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
+                    <div>
+                      <strong>Duplicate Transaction ID:</strong> &ldquo;{demandTrxNo.trim()}&rdquo; is already taken by another transaction. Please choose a unique Transaction ID or click <strong>Auto Generate</strong>.
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Must be unique. If left empty, a unique ID like <code>TRX-YYYYMMDD-XXXXX</code> is generated automatically.
+                  </p>
+                )}
               </div>
 
               <div>
@@ -3186,8 +3755,12 @@ export default function AdminReceiptsPage() {
                 </Button>
                 <Button
                   type="submit"
-                  disabled={isGenerating}
-                  className="cursor-pointer bg-emerald-700 hover:bg-emerald-800 text-slate-50"
+                  disabled={isGenerating || isTrxNoDuplicate}
+                  className={`cursor-pointer ${
+                    isTrxNoDuplicate
+                      ? 'bg-slate-400 cursor-not-allowed text-white'
+                      : 'bg-emerald-700 hover:bg-emerald-800 text-slate-50'
+                  }`}
                 >
                   {isGenerating ? 'Generating...' : 'Assign & Send Pending Dues'}
                 </Button>
@@ -3481,10 +4054,17 @@ export default function AdminReceiptsPage() {
         <Dialog open={openCollectModal} onOpenChange={setOpenCollectModal}>
           <DialogContent className={collectingTrx?.receipt_photo ? "w-[98vw] max-w-7xl xl:max-w-[1600px] 2xl:max-w-[1750px] max-h-[96vh] overflow-y-auto p-6 sm:p-8" : "w-[95vw] max-w-2xl sm:max-w-3xl max-h-[94vh] overflow-y-auto p-6 sm:p-8"}>
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2.5 text-emerald-800 text-xl font-bold">
-                <Wallet className="h-6 w-6 text-emerald-700" />
-                Collect Payment &amp; Issue Official Receipt
-              </DialogTitle>
+              <div className="flex items-center justify-between flex-wrap gap-2 pr-6">
+                <DialogTitle className="flex items-center gap-2.5 text-emerald-800 text-xl font-bold">
+                  <Wallet className="h-6 w-6 text-emerald-700" />
+                  Collect Payment &amp; Issue Official Receipt
+                </DialogTitle>
+                <div className="flex items-center gap-1.5 text-xs text-slate-600 bg-slate-100 px-3 py-1 rounded-full border border-slate-200 shadow-2xs font-medium">
+                  <Clock className="h-3.5 w-3.5 text-emerald-700 animate-pulse shrink-0" />
+                  <span className="text-slate-500">Current Time:</span>
+                  <span className="font-bold text-slate-900 font-mono">{currentTime}</span>
+                </div>
+              </div>
             </DialogHeader>
 
             {collectingTrx && (
@@ -3498,8 +4078,8 @@ export default function AdminReceiptsPage() {
                         <ImageIcon className="h-4.5 w-4.5 text-emerald-400" /> Member Payment Slip
                       </span>
                       {collectingTrx.receipt_photo_uploaded_at && (
-                        <span className="text-xs text-slate-400 font-mono">
-                          {collectingTrx.receipt_photo_uploaded_at}
+                        <span className="text-xs text-slate-300 font-mono font-medium">
+                          Uploaded: {formatDateTime(collectingTrx.receipt_photo_uploaded_at)}
                         </span>
                       )}
                     </div>
@@ -3568,8 +4148,13 @@ export default function AdminReceiptsPage() {
                           <span className="font-bold font-mono text-emerald-950">BDT {Number(collectingTrx.amount).toLocaleString()}</span>
                         </div>
                         <div>
-                          <span className="text-slate-500 font-medium">Due Date:</span>{' '}
+                          <span className="text-slate-500 font-medium">Billing Date:</span>{' '}
                           <span className="font-semibold">{collectingTrx.transaction_date}</span>
+                          {collectingTrx.created_at && (
+                            <span className="text-xs text-slate-500 block font-normal mt-0.5">
+                              Issued: {formatDateTime(collectingTrx.created_at)}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -3587,6 +4172,12 @@ export default function AdminReceiptsPage() {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-emerald-900 pt-1">
                           <div>Submitted Amount: <b className="text-emerald-950">BDT {Number(collectingTrx.member_paid_amount || collectingTrx.amount).toLocaleString()}</b></div>
                           <div>Payment Type: <b className="capitalize text-emerald-950">{collectingTrx.member_payment_method?.replace(/_/g, ' ') || 'Not specified'}</b></div>
+                          {collectingTrx.receipt_photo_uploaded_at && (
+                            <div className="sm:col-span-2 text-xs">
+                              <span className="text-emerald-800 font-medium">Slip Uploaded At:</span>{' '}
+                              <b className="text-emerald-950 font-bold">{formatDateTime(collectingTrx.receipt_photo_uploaded_at)}</b>
+                            </div>
+                          )}
                           {collectingTrx.member_trx_reference && (
                             <div className="sm:col-span-2 font-mono">Reference / TrxID: <b className="text-emerald-950">{collectingTrx.member_trx_reference}</b></div>
                           )}
@@ -3627,7 +4218,7 @@ export default function AdminReceiptsPage() {
                         />
                       </div>
 
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div>
                           <Label className="text-sm font-bold text-slate-800">Payment Method</Label>
                           <select
@@ -3652,6 +4243,26 @@ export default function AdminReceiptsPage() {
                             required
                           />
                         </div>
+
+                        <div>
+                          <div className="flex items-center justify-between">
+                            <Label className="text-sm font-bold text-slate-800">Settlement Time</Label>
+                            <button
+                              type="button"
+                              onClick={() => setPaymentTimeInput(getCurrentTimeHM())}
+                              className="text-[10px] text-emerald-700 hover:text-emerald-800 hover:underline font-bold cursor-pointer flex items-center gap-0.5"
+                              title="Set to Current Time"
+                            >
+                              <Clock className="h-2.5 w-2.5" /> Now
+                            </button>
+                          </div>
+                          <Input
+                            type="time"
+                            value={paymentTimeInput}
+                            onChange={(e) => setPaymentTimeInput(e.target.value)}
+                            className="mt-1.5 text-sm bg-white h-10 font-mono"
+                          />
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -3662,8 +4273,20 @@ export default function AdminReceiptsPage() {
                             value={paymentTrxRefInput}
                             onChange={(e) => setPaymentTrxRefInput(e.target.value)}
                             placeholder="e.g. bKash TrxID, Bank Ref, etc."
-                            className="mt-1.5 text-sm bg-white font-mono h-10"
+                            className={`mt-1.5 text-sm bg-white font-mono h-10 transition-colors ${
+                              isCollectTrxRefDuplicate
+                                ? 'border-rose-500 ring-2 ring-rose-500/30 text-rose-900 bg-rose-50/50'
+                                : ''
+                            }`}
                           />
+                          {isCollectTrxRefDuplicate && (
+                            <div className="mt-1.5 p-2 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-start gap-1.5 font-medium animate-in fade-in duration-200">
+                              <AlertCircle className="h-4 w-4 shrink-0 text-rose-600 mt-0.5" />
+                              <div>
+                                <strong>Duplicate Reference Code:</strong> This TrxID is already used on an active payment ({isCollectTrxRefDuplicate.member?.name || 'Member'} - {isCollectTrxRefDuplicate.month || isCollectTrxRefDuplicate.transaction_no}).
+                              </div>
+                            </div>
+                          )}
                         </div>
                         <div>
                           <Label className="text-sm font-bold text-slate-800">Admin Settlement Note (Optional)</Label>

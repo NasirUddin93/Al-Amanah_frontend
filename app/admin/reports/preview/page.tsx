@@ -199,7 +199,7 @@ export default function ReportPrintPreviewPage() {
   const [report] = useState<PrintingReportData>(SAMPLE_REPORT_DATA);
 
   return (
-    <RoleGate roles={['super_admin', 'admin']}>
+    <RoleGate roles={['super_admin', 'admin', 'accountant']}>
       <div className="min-h-screen bg-slate-100 p-6 print:p-0 print:m-0 print:bg-white print:min-h-0">
         {/* On-screen control bar (hidden when printing) */}
         <div className="max-w-4xl mx-auto mb-6 flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-xs print:hidden">

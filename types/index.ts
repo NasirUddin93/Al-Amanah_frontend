@@ -16,7 +16,13 @@ export interface Role {
 }
 
 export interface MemberProfile {
-  id: number; member_no: string; phone?: string; address?: string; share_amount: number;
+  id: number;
+  member_no: string;
+  phone?: string;
+  address?: string;
+  id_photo?: string;
+  id_photos?: string[];
+  share_amount: number;
 }
 
 export interface User {
@@ -29,7 +35,8 @@ export interface AdminModifier {
   id: number;
   name: string;
   role?: string;
-  action?: 'Created' | 'Updated' | string;
+  member_no?: string;
+  action?: 'Created' | 'Updated' | 'Confirmed' | 'Rejected' | string;
 }
 
 export interface Transaction {
@@ -71,6 +78,8 @@ export interface Receipt {
   payment_method: string;
   receipt_date: string;
   member?: { id: number; name: string; member_no?: string; email?: string; phone?: string };
+  created_by?: AdminModifier | string;
+  confirmed_by?: AdminModifier;
   transaction?: {
     id: number;
     transaction_no: string;
@@ -81,6 +90,9 @@ export interface Receipt {
     member_paid_amount?: number;
     member_trx_reference?: string;
     member_payment_method?: string;
+    created_by?: AdminModifier | string;
+    updated_by?: AdminModifier | string;
+    last_modified_by?: AdminModifier;
   };
   created_at?: string;
   updated_at?: string;
@@ -120,9 +132,73 @@ export interface AdminPaymentPermission {
 }
 
 export interface ActivityLog {
-  id: number; action: string; table_name: string; record_id?: number;
-  user?: string; ip_address?: string; created_at: string;
+  id: number;
+  action: string;
+  table_name: string;
+  record_id?: number | string;
+  old_values?: any;
+  new_values?: any;
+  ip_address?: string;
+  user_id?: number;
+  user?: {
+    id: number;
+    name: string;
+    email?: string;
+    role?: string;
+    designation?: string;
+  } | string;
+  user_name?: string;
+  created_at: string;
+}
+
+export interface ProfileShare {
+  id: number;
+  primary_user?: {
+    id: number;
+    name: string;
+    email?: string;
+    member_no?: string;
+    role?: string;
+  };
+  shared_user?: {
+    id: number;
+    name: string;
+    email?: string;
+    member_no?: string;
+    role?: string;
+  };
+  primary_user_id?: number;
+  shared_user_id?: number;
+  relation?: string;
+  group_name?: string;
+  status: 'active' | 'inactive' | string;
+  created_at?: string;
 }
 
 export interface PageMeta { current_page: number; last_page: number; per_page: number; total: number }
 export interface Paginated<T> { data: T[]; meta: PageMeta }
+
+export interface DashboardStats {
+  total_transactions: number;
+  total_demands: number;
+  total_collections: number;
+  total_receipts: number;
+  cleared_receipts_count: number;
+  cleared_receipts_amount: number;
+  partial_count: number;
+  partial_collected_amount: number;
+  received_slips_count: number;
+  received_slips_amount: number;
+  due_pending_count: number;
+  due_pending_amount: number;
+  pure_unpaid_due_count: number;
+  rejected_slips_count: number;
+  rejected_slips_amount: number;
+  pending_slips: number;
+  pending_slips_amount: number;
+  active_members: number;
+  total_users: number;
+  total_expenses: number;
+  total_fdrs: number;
+}
+

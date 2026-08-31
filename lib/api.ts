@@ -166,6 +166,17 @@ export const api = createApi({
       }),
       invalidatesTags: ['Transactions', 'Receipts', 'Notifications'],
     }),
+    batchUploadReceiptPhoto: builder.mutation<
+      { message: string; transactions: T.Transaction[] },
+      { body: { transaction_ids: number[]; photo_data?: string | null; trx_reference: string; payment_method?: string; comment?: string; allocations?: { transaction_id: number; paid_amount: number }[] } }
+    >({
+      query: ({ body }) => ({
+        url: '/transactions/batch-upload-receipt-photo',
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Transactions', 'Receipts', 'Notifications'],
+    }),
     rejectReceiptPhoto: builder.mutation<{ message: string; transaction: T.Transaction }, { id: number; body?: { reason?: string } }>({
       query: ({ id, body }) => ({
         url: `/transactions/${id}/reject-receipt-photo`,
@@ -176,6 +187,10 @@ export const api = createApi({
     }),
     getReport: builder.query<T.TransactionList, { from?: string; to?: string; type?: string; page?: number; per_page?: number } | void>({
       query: (params) => ({ url: '/reports/transactions', params: params || undefined }),
+    }),
+    getDashboardStats: builder.query<{ success: boolean; data: T.DashboardStats }, void>({
+      query: () => '/reports/stats',
+      providesTags: ['Transactions', 'Receipts', 'Users', 'MeetingExpenses', 'Fdrs'],
     }),
 
     /* ---------- Receipts ---------- */
@@ -263,11 +278,39 @@ export const api = createApi({
     assignPaymentPermission: builder.mutation<T.AdminPaymentPermission, { admin_user_id: number; can_change_payment: boolean }>({
       query: (body) => ({ url: '/admin-payment-permissions', method: 'POST', body }),
       transformResponse: (res: any) => res?.data || res,
-      invalidatesTags: ['AdminPermissions'],
+      invalidatesTags: ['AdminPermissions', 'Users'],
+    }),
+
+    /* ---------- Profile Shares (Merged / Linked Accounts) ---------- */
+    getProfileShares: builder.query<{ data: T.ProfileShare[] } | T.Paginated<T.ProfileShare> | T.ProfileShare[], void>({
+      query: () => '/profile-shares',
+      transformResponse: (res: any) => res?.data || res,
+      providesTags: ['ProfileShares'],
+    }),
+    createProfileShare: builder.mutation<T.ProfileShare, { primary_user_id?: number; shared_user_id?: number; member_ids?: number[]; shared_user_ids?: number[]; relation?: string; group_name?: string; status?: string }>({
+      query: (body) => ({ url: '/profile-shares', method: 'POST', body }),
+      transformResponse: (res: any) => res?.data || res,
+      invalidatesTags: ['ProfileShares', 'Users'],
+    }),
+    updateProfileShare: builder.mutation<T.ProfileShare, { id: number; status?: string; group_name?: string }>({
+      query: ({ id, ...body }) => ({ url: `/profile-shares/${id}`, method: 'PUT', body }),
+      transformResponse: (res: any) => res?.data || res,
+      invalidatesTags: ['ProfileShares', 'Users'],
+    }),
+    deleteProfileShare: builder.mutation<{ message: string }, number>({
+      query: (id) => ({ url: `/profile-shares/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['ProfileShares', 'Users'],
     }),
 
     /* ---------- Activity Logs ---------- */
-    getActivityLogs: builder.query<T.Paginated<T.ActivityLog>, { page?: number } | void>({
+    getActivityLogs: builder.query<T.Paginated<T.ActivityLog>, {
+      page?: number;
+      per_page?: number;
+      search?: string;
+      action?: string;
+      table_name?: string;
+      user_id?: number;
+    } | void>({
       query: (params) => ({ url: '/activity-logs', params: params || undefined }),
       providesTags: ['ActivityLogs'],
     }),
@@ -282,13 +325,15 @@ export const {
   useGetTransactionsQuery, useCreateTransactionMutation, useUpdateTransactionMutation,
   useCollectPaymentMutation,
   useUploadReceiptPhotoMutation,
+  useBatchUploadReceiptPhotoMutation,
   useRejectReceiptPhotoMutation,
-  useDeleteTransactionMutation, useGeneratePaymentsMutation, useGetReportQuery,
+  useDeleteTransactionMutation, useGeneratePaymentsMutation, useGetReportQuery, useGetDashboardStatsQuery,
   useGetReceiptsQuery, useCreateReceiptMutation, useUpdateReceiptMutation, useDeleteReceiptMutation,
   useGetMeetingExpensesQuery, useCreateMeetingExpenseMutation, useDeleteMeetingExpenseMutation,
   useGetFdrsQuery, useCreateFdrMutation, useDeleteFdrMutation,
   useGetNotificationsQuery, useMarkReadMutation, useMarkAllReadMutation,
   useGetSettingsQuery, useUpdateSettingMutation,
   useGetAdminPermissionsQuery, useAssignPaymentPermissionMutation,
+  useGetProfileSharesQuery, useCreateProfileShareMutation, useUpdateProfileShareMutation, useDeleteProfileShareMutation,
   useGetActivityLogsQuery,
 } = api;

@@ -17,6 +17,33 @@
   --gold-soft: #fef3c7;
   --shadow: 0 20px 50px -20px rgba(4,120,87,.25);
   --radius: 22px;
+  --app-header-height: 56px;
+  --app-bottom-nav-height: 64px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
+}
+
+/* Safe area padding utilities */
+.pb-safe {
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+.min-h-screen-dvh {
+  min-height: 100dvh;
+}
+
+/* iOS Safari prevent auto-zoom on focus while typing */
+@media screen and (max-width: 768px) {
+  input[type="text"],
+  input[type="number"],
+  input[type="email"],
+  input[type="password"],
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
 }
 
 @theme inline {
@@ -26,8 +53,8 @@
   --font-mono: var(--font-geist-mono);
 }
 
-html { scroll-behavior: smooth; }
-body { font-family: 'Plus Jakarta Sans', sans-serif; background: var(--white); color: var(--ink); overflow-x: hidden; }
+html { scroll-behavior: smooth; overflow-x: hidden; width: 100%; max-width: 100%; }
+body { font-family: 'Plus Jakarta Sans', sans-serif; background: var(--white); color: var(--ink); overflow-x: hidden; width: 100%; max-width: 100%; }
 .bn { font-family: 'Hind Siliguri', sans-serif; }
 .serif { font-family: 'Playfair Display', serif; }
 .container { width: min(1180px, 92%); margin: 0 auto; }
