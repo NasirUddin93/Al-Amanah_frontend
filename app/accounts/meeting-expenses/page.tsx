@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Badge } from '@/components/ui/badge';
 import {
   ExpenseVoucherPrintArea,
   ExpensesReportPrintArea,
@@ -31,14 +32,17 @@ import {
   ChevronDown,
   ChevronUp,
   FileText,
+  Building2,
+  FolderOpen,
   Filter,
   CheckCircle2,
   Sparkles,
   Info,
+  Clock,
   Layers,
 } from 'lucide-react';
 
-export default function AccountsExpensesPage() {
+export default function AdminExpensesPage() {
   return (
     <RoleGate roles={['super_admin', 'admin', 'accountant']}>
       <ExpensesContent />
@@ -52,7 +56,7 @@ function ExpensesContent() {
     pollingInterval: 4000,
   });
   const [createExpense, { isLoading: isCreating }] = useCreateMeetingExpenseMutation();
-  const [deleteExpense] = useDeleteMeetingExpenseMutation();
+  const [deleteExpense, { isLoading: isDeleting }] = useDeleteMeetingExpenseMutation();
 
   // Search & Filters State
   const [searchTerm, setSearchTerm] = useState('');
@@ -96,6 +100,7 @@ function ExpensesContent() {
             if (parsed.prepared_by) prepared_by = parsed.prepared_by;
           }
         } catch {
+          // If description is just plain text
           notes = e.description;
           items = [{ label: e.description || e.title, value: Number(e.amount || 0) }];
         }
@@ -239,7 +244,7 @@ function ExpensesContent() {
       items: formItems.filter((it) => it.label.trim() !== '' || it.value > 0),
       voucher_no: formVoucherNo || `EXP-${Date.now()}`,
       notes: formNotes,
-      prepared_by: user?.name || 'Accounts Officer',
+      prepared_by: user?.name || 'Admin Desk',
     });
 
     try {
@@ -284,7 +289,7 @@ function ExpensesContent() {
               <span>Society Expenses</span>
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 mt-1">
-              Record itemized society expenses with dynamic label-value tables and print official vouchers.
+              Create dynamic itemized expense sheets with label &amp; value line items, track disbursements, and print official vouchers.
             </p>
           </div>
 
@@ -322,7 +327,7 @@ function ExpensesContent() {
               <div className="text-2xl font-bold text-slate-900">
                 BDT {totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
-              <p className="text-[11px] text-slate-500 mt-0.5">Audited society disbursements</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">Total audited society disbursements</p>
             </CardContent>
           </Card>
 
@@ -342,7 +347,7 @@ function ExpensesContent() {
           <Card className="border-slate-200 shadow-2xs hover:border-emerald-200 transition-colors">
             <CardHeader className="p-4 pb-2">
               <CardTitle className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
-                <span>This Month</span>
+                <span>This Month ({new Date().toLocaleString('en-US', { month: 'short' })})</span>
                 <Calendar className="h-4 w-4 text-indigo-600" />
               </CardTitle>
             </CardHeader>
@@ -350,7 +355,7 @@ function ExpensesContent() {
               <div className="text-2xl font-bold text-indigo-900">
                 BDT {currentMonthTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
-              <p className="text-[11px] text-slate-500 mt-0.5">Current cycle disbursements</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">Current billing cycle disbursements</p>
             </CardContent>
           </Card>
 
@@ -365,7 +370,7 @@ function ExpensesContent() {
               <div className="text-2xl font-bold text-slate-900">
                 BDT {parsedExpenses.length > 0 ? Math.round(totalAmount / parsedExpenses.length).toLocaleString() : '0.00'}
               </div>
-              <p className="text-[11px] text-slate-500 mt-0.5">Average voucher amount</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">Average cost per expense sheet</p>
             </CardContent>
           </Card>
         </div>
@@ -385,15 +390,15 @@ function ExpensesContent() {
           </CardContent>
         </Card>
 
-        {/* Expenses Table */}
+        {/* Expenses List & Table Cards */}
         <Card className="border-slate-200 shadow-xs">
           <CardHeader className="p-4 border-b border-slate-100 flex flex-row items-center justify-between">
             <div>
               <CardTitle className="text-sm font-bold text-slate-900">
-                Expenses Vouchers List ({filteredExpenses.length})
+                Official Expenses Sheets ({filteredExpenses.length})
               </CardTitle>
               <p className="text-xs text-slate-500 mt-0.5">
-                Itemized expense sheets with label &amp; value details and voucher printing.
+                Itemized breakdown sheets with label &amp; value details and 1-click voucher printing.
               </p>
             </div>
           </CardHeader>
@@ -402,14 +407,14 @@ function ExpensesContent() {
             <Table>
               <TableHeader className="bg-slate-50/80">
                 <TableRow className="text-xs font-bold text-slate-700">
-                  <TableHead className="w-12 text-center">#</TableHead>
-                  <TableHead className="w-32">Date &amp; Time</TableHead>
-                  <TableHead className="w-36">Voucher #</TableHead>
-                  <TableHead className="min-w-[200px]">Expense Title / Purpose</TableHead>
-                  <TableHead className="w-44">Added By</TableHead>
-                  <TableHead className="w-20 text-center">Items</TableHead>
-                  <TableHead className="w-36 text-right">Total Amount</TableHead>
-                  <TableHead className="w-36 text-right">Actions</TableHead>
+                  <TableHead className="text-center">#</TableHead>
+                  <TableHead>Date &amp; Time</TableHead>
+                  <TableHead>Voucher #</TableHead>
+                  <TableHead>Expense Title / Purpose</TableHead>
+                  <TableHead>Added By</TableHead>
+                  <TableHead className="text-center">Items</TableHead>
+                  <TableHead className="text-right">Total Amount</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -437,8 +442,8 @@ function ExpensesContent() {
 
                 {filteredExpenses.map((exp, idx) => {
                   const isExpanded = !!expandedRows[exp.id];
-                  const creatorName = exp.creator?.name || exp.created_by || exp.prepared_by || 'Accounts Desk';
-                  const creatorIdStr = exp.creator?.member_no ? `Folio #${exp.creator.member_no}` : (exp.created_by_id ? `ID #${exp.created_by_id}` : (exp.creator?.id ? `ID #${exp.creator.id}` : 'Staff'));
+                  const creatorName = exp.creator?.name || exp.created_by || exp.prepared_by || 'Admin';
+                  const creatorIdStr = exp.creator?.member_no ? `ID: ${exp.creator.member_no}` : (exp.created_by_id ? `ID: ${exp.created_by_id}` : (exp.creator?.id ? `ID: ${exp.creator.id}` : 'Staff'));
 
                   return (
                     <React.Fragment key={exp.id}>
@@ -462,14 +467,14 @@ function ExpensesContent() {
                         <TableCell>
                           <div className="font-bold text-slate-900 text-xs sm:text-sm leading-snug">{exp.title}</div>
                         </TableCell>
-                        <TableCell>
-                          <div className="font-bold text-slate-900 text-xs truncate max-w-[170px]">{creatorName}</div>
+                        <TableCell className="whitespace-nowrap">
+                          <div className="font-bold text-slate-900 text-xs">{creatorName}</div>
                           <div className="flex items-center gap-1 mt-0.5">
                             <span className="font-mono text-[10.5px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded">
                               {creatorIdStr}
                             </span>
                             {exp.creator?.role && (
-                              <span className="text-[10px] text-slate-400 capitalize truncate max-w-[90px]">
+                              <span className="text-[10px] text-slate-400 capitalize">
                                 ({exp.creator.role.replace('_', ' ')})
                               </span>
                             )}
@@ -491,7 +496,7 @@ function ExpensesContent() {
                         <TableCell className="text-right font-mono font-bold text-emerald-950 text-sm whitespace-nowrap">
                           BDT {exp.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1.5">
                             <Button
                               size="sm"
@@ -544,11 +549,11 @@ function ExpensesContent() {
                               <Table className="text-xs">
                                 <TableHeader className="bg-emerald-50/60">
                                   <TableRow>
-                                    <TableHead className="w-12 text-center text-emerald-900 font-bold">#</TableHead>
+                                    <TableHead className="text-center text-emerald-900 font-bold">#</TableHead>
                                     <TableHead className="text-emerald-900 font-bold">Item Particulars / Description</TableHead>
-                                    <TableHead className="w-20 text-center text-emerald-900 font-bold">Qty</TableHead>
-                                    <TableHead className="w-32 text-right text-emerald-900 font-bold">Unit Rate (৳)</TableHead>
-                                    <TableHead className="w-36 text-right text-emerald-900 font-bold">Total Amount (৳)</TableHead>
+                                    <TableHead className="text-center text-emerald-900 font-bold">Qty</TableHead>
+                                    <TableHead className="text-right text-emerald-900 font-bold">Unit Rate (৳)</TableHead>
+                                    <TableHead className="text-right text-emerald-900 font-bold">Total Amount (৳)</TableHead>
                                   </TableRow>
                                 </TableHeader>
                                 <TableBody>

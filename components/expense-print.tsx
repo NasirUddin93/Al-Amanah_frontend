@@ -69,7 +69,7 @@ export function ExpenseVoucherPrintArea({ voucher }: { voucher: ParsedExpenseDat
   const totalAmount = Number(voucher.amount || 0);
   const amountInWords = numberToWordsBDT(totalAmount);
   const creatorName = voucher.creator?.name || voucher.created_by || voucher.prepared_by || 'Admin / Accounts Desk';
-  const creatorId = voucher.creator?.member_no ? `Folio #${voucher.creator.member_no}` : (voucher.created_by_id ? `User ID #${voucher.created_by_id}` : (voucher.creator?.id ? `ID #${voucher.creator.id}` : 'Staff'));
+  const creatorId = voucher.creator?.member_no ? `ID: ${voucher.creator.member_no}` : (voucher.created_by_id ? `ID: ${voucher.created_by_id}` : (voucher.creator?.id ? `ID: ${voucher.creator.id}` : 'Staff'));
 
   return (
     <div className="expense-voucher-print-container hidden print:block">
@@ -375,7 +375,7 @@ export function ExpensesReportPrintArea({
             <tbody>
               {expenses.map((exp, idx) => {
                 const cName = exp.creator?.name || exp.created_by || exp.prepared_by || 'Admin';
-                const cId = exp.creator?.member_no ? `Folio #${exp.creator.member_no}` : (exp.created_by_id ? `ID #${exp.created_by_id}` : (exp.creator?.id ? `ID #${exp.creator.id}` : ''));
+                const cId = exp.creator?.member_no ? `ID: ${exp.creator.member_no}` : (exp.created_by_id ? `ID: ${exp.created_by_id}` : (exp.creator?.id ? `ID: ${exp.creator.id}` : ''));
 
                 return (
                   <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0', background: idx % 2 === 1 ? '#fbfdfc' : '#ffffff' }}>

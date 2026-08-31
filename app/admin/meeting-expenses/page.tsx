@@ -44,7 +44,7 @@ import {
 
 export default function AdminExpensesPage() {
   return (
-    <RoleGate roles={['super_admin', 'admin']}>
+    <RoleGate roles={['super_admin', 'admin', 'accountant']}>
       <ExpensesContent />
     </RoleGate>
   );
@@ -407,14 +407,14 @@ function ExpensesContent() {
             <Table>
               <TableHeader className="bg-slate-50/80">
                 <TableRow className="text-xs font-bold text-slate-700">
-                  <TableHead className="w-12 text-center">#</TableHead>
-                  <TableHead className="w-32">Date &amp; Time</TableHead>
-                  <TableHead className="w-36">Voucher #</TableHead>
-                  <TableHead className="min-w-[200px]">Expense Title / Purpose</TableHead>
-                  <TableHead className="w-44">Added By</TableHead>
-                  <TableHead className="w-20 text-center">Items</TableHead>
-                  <TableHead className="w-36 text-right">Total Amount</TableHead>
-                  <TableHead className="w-36 text-right">Actions</TableHead>
+                  <TableHead className="text-center">#</TableHead>
+                  <TableHead>Date &amp; Time</TableHead>
+                  <TableHead>Voucher #</TableHead>
+                  <TableHead>Expense Title / Purpose</TableHead>
+                  <TableHead>Added By</TableHead>
+                  <TableHead className="text-center">Items</TableHead>
+                  <TableHead className="text-right">Total Amount</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -443,7 +443,7 @@ function ExpensesContent() {
                 {filteredExpenses.map((exp, idx) => {
                   const isExpanded = !!expandedRows[exp.id];
                   const creatorName = exp.creator?.name || exp.created_by || exp.prepared_by || 'Admin';
-                  const creatorIdStr = exp.creator?.member_no ? `Folio #${exp.creator.member_no}` : (exp.created_by_id ? `ID #${exp.created_by_id}` : (exp.creator?.id ? `ID #${exp.creator.id}` : 'Staff'));
+                  const creatorIdStr = exp.creator?.member_no ? `ID: ${exp.creator.member_no}` : (exp.created_by_id ? `ID: ${exp.created_by_id}` : (exp.creator?.id ? `ID: ${exp.creator.id}` : 'Staff'));
 
                   return (
                     <React.Fragment key={exp.id}>
@@ -467,14 +467,14 @@ function ExpensesContent() {
                         <TableCell>
                           <div className="font-bold text-slate-900 text-xs sm:text-sm leading-snug">{exp.title}</div>
                         </TableCell>
-                        <TableCell>
-                          <div className="font-bold text-slate-900 text-xs truncate max-w-[170px]">{creatorName}</div>
+                        <TableCell className="whitespace-nowrap">
+                          <div className="font-bold text-slate-900 text-xs">{creatorName}</div>
                           <div className="flex items-center gap-1 mt-0.5">
                             <span className="font-mono text-[10.5px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded">
                               {creatorIdStr}
                             </span>
                             {exp.creator?.role && (
-                              <span className="text-[10px] text-slate-400 capitalize truncate max-w-[90px]">
+                              <span className="text-[10px] text-slate-400 capitalize">
                                 ({exp.creator.role.replace('_', ' ')})
                               </span>
                             )}
@@ -496,7 +496,7 @@ function ExpensesContent() {
                         <TableCell className="text-right font-mono font-bold text-emerald-950 text-sm whitespace-nowrap">
                           BDT {exp.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1.5">
                             <Button
                               size="sm"
@@ -549,11 +549,11 @@ function ExpensesContent() {
                               <Table className="text-xs">
                                 <TableHeader className="bg-emerald-50/60">
                                   <TableRow>
-                                    <TableHead className="w-12 text-center text-emerald-900 font-bold">#</TableHead>
+                                    <TableHead className="text-center text-emerald-900 font-bold">#</TableHead>
                                     <TableHead className="text-emerald-900 font-bold">Item Particulars / Description</TableHead>
-                                    <TableHead className="w-20 text-center text-emerald-900 font-bold">Qty</TableHead>
-                                    <TableHead className="w-32 text-right text-emerald-900 font-bold">Unit Rate (৳)</TableHead>
-                                    <TableHead className="w-36 text-right text-emerald-900 font-bold">Total Amount (৳)</TableHead>
+                                    <TableHead className="text-center text-emerald-900 font-bold">Qty</TableHead>
+                                    <TableHead className="text-right text-emerald-900 font-bold">Unit Rate (৳)</TableHead>
+                                    <TableHead className="text-right text-emerald-900 font-bold">Total Amount (৳)</TableHead>
                                   </TableRow>
                                 </TableHeader>
                                 <TableBody>

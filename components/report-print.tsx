@@ -230,7 +230,7 @@ export function ReportPrintArea({ report, preview = false }: ReportPrintAreaProp
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <span style={{ fontSize: '16.5px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.025em' }}>{sec.memberName || sec.memberHeader}</span>
-                        <span style={{ fontSize: '13px', fontFamily: 'monospace', fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: '#047857', color: '#a7f3d0' }}>FOLIO #{sec.memberNo || 'MEM'}</span>
+                        <span style={{ fontSize: '13px', fontFamily: 'monospace', fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: '#047857', color: '#a7f3d0' }}>ID: {sec.memberNo || 'MEM'}</span>
                       </div>
                       {sec.memberSubHeader && <div style={{ fontSize: '12.5px', color: '#a7f3d0', marginTop: 2 }}>{sec.memberSubHeader}</div>}
                     </div>
@@ -272,7 +272,7 @@ export function ReportPrintArea({ report, preview = false }: ReportPrintAreaProp
                         <tr style={{ background: '#f8fbf9', color: '#065f46', fontSize: '13px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid #a7f3d0', WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' } as React.CSSProperties}>
                           <th style={{ padding: '6px 10px', textAlign: 'center', width: 32 }}>#</th>
                           <th style={{ padding: '6px 10px', textAlign: 'left', width: 95 }}>Date</th>
-                          <th style={{ padding: '6px 10px', textAlign: 'left' }}>Transaction ID / Reference</th>
+                          <th style={{ padding: '6px 10px', textAlign: 'left', width: 170 }}>Reference ID</th>
                           <th style={{ padding: '6px 10px', textAlign: 'center', width: 90 }}>Status</th>
                           <th style={{ padding: '6px 10px', textAlign: 'right', width: 120 }}>Assessed (৳)</th>
                           <th style={{ padding: '6px 10px', textAlign: 'right', width: 120 }}>Settled (৳)</th>
@@ -297,10 +297,7 @@ export function ReportPrintArea({ report, preview = false }: ReportPrintAreaProp
                               <td style={{ padding: '6px 10px', textAlign: 'center', fontFamily: 'monospace', color: '#94a3b8', fontSize: '13px' }}>{row.serial}</td>
                               <td style={{ padding: '6px 10px', textAlign: 'left', fontFamily: 'monospace', color: '#475569', fontSize: '13px' }}>{row.date}</td>
                               <td style={{ padding: '6px 10px', textAlign: 'left', fontFamily: 'monospace', color: '#334155', fontSize: '13px' }}>
-                                <span style={{ fontWeight: 600 }}>{row.transactionNo || row.refNo || '-'}</span>
-                                {row.refNo && row.refNo !== '-' && row.refNo !== row.transactionNo && (
-                                  <span style={{ fontSize: '11.5px', fontFamily: 'monospace', marginLeft: 6, padding: '2px 5px', borderRadius: 3, border: '1px solid #fde68a', background: '#fef3c7', color: '#92400e', fontWeight: 600 }}>#{row.refNo}</span>
-                                )}
+                                <span style={{ fontWeight: 600 }}>{row.refNo && row.refNo !== '-' ? row.refNo : '-'}</span>
                               </td>
                               <td style={{ padding: '6px 10px', textAlign: 'center' }}>
                                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 9999, fontSize: '11.5px', fontWeight: 700, border: `1px solid ${statusStyle.border}`, background: statusStyle.bg, color: statusStyle.color }}>

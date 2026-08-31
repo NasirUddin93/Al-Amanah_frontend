@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 
 export default function ReportsPage() {
   return (
-    <RoleGate roles={['super_admin', 'admin']}>
+    <RoleGate roles={['super_admin', 'admin', 'accountant']}>
       <ReportContent />
     </RoleGate>
   );

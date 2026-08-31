@@ -190,7 +190,7 @@ function extractInputtedReference(trx?: any, receipt?: any): string {
 
 export default function AdminReportsPage() {
   return (
-    <RoleGate roles={['super_admin', 'admin']}>
+    <RoleGate roles={['super_admin', 'admin', 'accountant']}>
       <ReportHierarchyManagerContent />
     </RoleGate>
   );

@@ -15,6 +15,9 @@ export const userSchema = z.object({
   can_change_payment: z.boolean().optional(),
   member_no: z.string().optional(),
   phone: z.string().optional(),
+  address: z.string().optional(),
+  id_photo: z.string().optional(),
+  id_photos: z.array(z.string()).optional(),
 });
 export type UserValues = z.infer<typeof userSchema>;
 

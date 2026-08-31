@@ -26,6 +26,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { ReceiptSlipThumbnail, MagnifiableModalImage } from '@/components/receipt-magnifier';
 import type { Transaction, User } from '@/types';
+import { formatDateTime, formatDate } from '@/lib/utils';
 import {
   PlusCircle,
   CalendarCheck,
@@ -117,9 +118,30 @@ export default function AdminTransactionsPage() {
   const [paidAmountInput, setPaidAmountInput] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'bank' | 'mobile_banking' | 'other'>('cash');
   const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [paymentTime, setPaymentTime] = useState<string>('');
+  const [currentTime, setCurrentTime] = useState<string>('');
   const [paymentNotes, setPaymentNotes] = useState<string>('');
   const [createReceipt, setCreateReceipt] = useState<boolean>(true);
   const [collectionReceiptPhoto, setCollectionReceiptPhoto] = useState<string | null>(null);
+
+  const getCurrentTimeHM = () => {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  };
+
+  React.useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      setCurrentTime(
+        now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) +
+        ', ' +
+        now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
+      );
+    };
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Lightbox Receipt Photo Modal (View-only for Admins)
   const [openPhotoModal, setOpenPhotoModal] = useState(false);
@@ -237,6 +259,7 @@ export default function AdminTransactionsPage() {
     setPaymentMethod(defaultMethod);
 
     setPaymentDate(new Date().toISOString().split('T')[0]);
+    setPaymentTime(getCurrentTimeHM());
 
     const noteParts: string[] = [];
     if (trx.member_trx_reference) {
@@ -321,13 +344,17 @@ export default function AdminTransactionsPage() {
     if (!confirmed) return;
 
     try {
+      const combinedNotes: string[] = [];
+      if (paymentNotes.trim()) combinedNotes.push(paymentNotes.trim());
+      if (paymentTime.trim()) combinedNotes.push(`Settlement Time: ${paymentTime.trim()}`);
+
       const res = await collectPayment({
         id: collectingTrx.id,
         body: {
           paid_amount: inputNum,
           payment_method: paymentMethod,
           payment_date: paymentDate,
-          notes: paymentNotes || undefined,
+          notes: combinedNotes.length > 0 ? combinedNotes.join(' | ') : undefined,
           create_receipt: createReceipt,
         },
       }).unwrap();
@@ -688,7 +715,11 @@ export default function AdminTransactionsPage() {
             <Button
               onClick={() => {
                 const settingsList = Array.isArray(settings) ? settings : (settings as any)?.data || [];
-                const defaultFee = settingsList.find((s: any) => s.setting_key === 'payment_amount_1')?.setting_value || '2000';
+                const defaultFee =
+                  settingsList.find((s: any) => s.setting_key === 'monthly_subscription_default')?.setting_value ||
+                  settingsList.find((s: any) => s.setting_key === 'payment_amount_1')?.setting_value ||
+                  '2000';
+                setDemandCategory('monthly_payment');
                 setDemandAmount(defaultFee);
                 setTargetAllMembers(true);
                 setSelectedMemberId('');
@@ -1563,9 +1594,21 @@ export default function AdminTransactionsPage() {
                                         )}
                                       </div>
                                     </div>
-                                    <div className="text-[11px] text-slate-500 mt-1 flex items-center justify-between">
-                                      <span>Due Date: {pt.transaction_date}</span>
-                                      <span className="font-mono text-[10px] text-slate-400">{pt.transaction_no}</span>
+                                    <div className="text-[11px] text-slate-500 mt-1 flex flex-col gap-0.5">
+                                      <div className="flex items-center justify-between">
+                                        <span>Due Date: <b>{pt.transaction_date}</b></span>
+                                        <span className="font-mono text-[10px] text-slate-400">{pt.transaction_no}</span>
+                                      </div>
+                                      {pt.receipt_photo_uploaded_at && (
+                                        <div className="text-[10px] text-blue-700 font-medium">
+                                          Received / Slip: <b>{formatDateTime(pt.receipt_photo_uploaded_at)}</b>
+                                        </div>
+                                      )}
+                                      {pt.created_at && (
+                                        <div className="text-[10px] text-slate-400">
+                                          Demand Issued: {formatDateTime(pt.created_at)}
+                                        </div>
+                                      )}
                                     </div>
 
                                     <div className="mt-2.5 pt-2 border-t border-slate-100 flex flex-col gap-1.5">
@@ -1575,7 +1618,7 @@ export default function AdminTransactionsPage() {
                                             <ReceiptSlipThumbnail
                                               photoUrl={pt.receipt_photo}
                                               title={`${member.name} - ${pt.month || pt.description || 'Receipt Slip'}`}
-                                              date={pt.receipt_photo_uploaded_at ? `Uploaded: ${pt.receipt_photo_uploaded_at}` : undefined}
+                                              date={pt.receipt_photo_uploaded_at ? `Uploaded: ${formatDateTime(pt.receipt_photo_uploaded_at)}` : undefined}
                                               isRejected={pt.status === 'rejected'}
                                               isPartial={Boolean(isRemainingDue)}
                                               rejectionReason={pt.rejection_reason}
@@ -1796,7 +1839,22 @@ export default function AdminTransactionsPage() {
                                             )}
                                           </div>
                                         </TableCell>
-                                        <TableCell className="p-3 align-middle text-center text-slate-500">{paid.transaction_date}</TableCell>
+                                        <TableCell className="p-3 align-middle text-center text-slate-600">
+                                          <div className="flex flex-col items-center gap-0.5">
+                                            <span className="font-bold text-emerald-800 text-xs flex items-center gap-1">
+                                              <CheckCircle2 className="h-3 w-3 inline text-emerald-600 shrink-0" />
+                                              <span>Settled: {formatDateTime(paid.updated_at || paid.transaction_date)}</span>
+                                            </span>
+                                            {paid.receipt_photo_uploaded_at && (
+                                              <span className="text-[10px] text-blue-700 font-medium">
+                                                Received / Slip: {formatDateTime(paid.receipt_photo_uploaded_at)}
+                                              </span>
+                                            )}
+                                            <span className="text-[10px] text-slate-400 font-medium">
+                                              Due: {paid.transaction_date}
+                                            </span>
+                                          </div>
+                                        </TableCell>
                                       </TableRow>
                                     );
                                   })}
@@ -1819,10 +1877,17 @@ export default function AdminTransactionsPage() {
       <Dialog open={openCollect} onOpenChange={setOpenCollect}>
         <DialogContent className={collectingTrx?.receipt_photo ? "w-[96vw] max-w-6xl xl:max-w-7xl max-h-[95vh] overflow-y-auto p-5 sm:p-6" : "max-w-lg"}>
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-slate-900 text-lg">
-              <Wallet className="h-5 w-5 text-emerald-700" />
-              Collect Payment & Settle Dues
-            </DialogTitle>
+            <div className="flex items-center justify-between flex-wrap gap-2 pr-6">
+              <DialogTitle className="flex items-center gap-2 text-slate-900 text-lg">
+                <Wallet className="h-5 w-5 text-emerald-700" />
+                Collect Payment &amp; Settle Dues
+              </DialogTitle>
+              <div className="flex items-center gap-1.5 text-xs text-slate-600 bg-slate-100 px-3 py-1 rounded-full border border-slate-200 shadow-2xs font-medium">
+                <Clock className="h-3.5 w-3.5 text-emerald-700 animate-pulse shrink-0" />
+                <span className="text-slate-500">Current Time:</span>
+                <span className="font-bold text-slate-900 font-mono">{currentTime}</span>
+              </div>
+            </div>
           </DialogHeader>
 
           {collectingTrx && (
@@ -1834,8 +1899,8 @@ export default function AdminTransactionsPage() {
                       <ImageIcon className="h-4 w-4 text-emerald-400" /> Member Payment Slip
                     </span>
                     {collectingTrx.receipt_photo_uploaded_at && (
-                      <span className="text-[11px] text-slate-400 font-mono">
-                        {collectingTrx.receipt_photo_uploaded_at}
+                      <span className="text-[11px] text-slate-300 font-mono font-medium">
+                        Uploaded: {formatDateTime(collectingTrx.receipt_photo_uploaded_at)}
                       </span>
                     )}
                   </div>
@@ -1898,9 +1963,12 @@ export default function AdminTransactionsPage() {
                       </div>
                     </div>
 
-                    <div className="text-[11px] text-slate-600 border-t border-slate-200/80 pt-1.5 flex justify-between">
+                    <div className="text-[11px] text-slate-600 border-t border-slate-200/80 pt-1.5 flex justify-between items-center">
                       <span>Fee Item: <b>{collectingTrx.month || collectingTrx.description || collectingTrx.type}</b></span>
-                      <span className="font-mono text-slate-400">{collectingTrx.transaction_no}</span>
+                      <div className="text-right font-mono text-slate-400 text-[10px]">
+                        <div>{collectingTrx.transaction_no}</div>
+                        {collectingTrx.created_at && <div>Issued: {formatDateTime(collectingTrx.created_at)}</div>}
+                      </div>
                     </div>
                   </div>
 
@@ -1916,6 +1984,12 @@ export default function AdminTransactionsPage() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px] text-emerald-900 pt-0.5">
                         <div>Submitted Amount: <b>BDT {Number(collectingTrx.member_paid_amount || collectingTrx.amount).toLocaleString()}</b></div>
                         <div>Transaction Type: <b className="capitalize">{collectingTrx.member_payment_method?.replace(/_/g, ' ') || 'Not specified'}</b></div>
+                        {collectingTrx.receipt_photo_uploaded_at && (
+                          <div className="sm:col-span-2 text-[10px]">
+                            <span className="text-emerald-800 font-medium">Slip Uploaded At:</span>{' '}
+                            <b className="text-emerald-950 font-bold">{formatDateTime(collectingTrx.receipt_photo_uploaded_at)}</b>
+                          </div>
+                        )}
                         {collectingTrx.member_trx_reference && (
                           <div className="sm:col-span-2 font-mono">Reference Code / TrxID: <b>{collectingTrx.member_trx_reference}</b></div>
                         )}
@@ -2003,11 +2077,11 @@ export default function AdminTransactionsPage() {
                     )}
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                       <Label className="text-xs font-bold text-slate-900">Payment Method</Label>
                       <select
-                        className="w-full border border-slate-300 rounded-md p-2 bg-white text-xs mt-1 font-medium cursor-pointer"
+                        className="w-full border border-slate-300 rounded-md p-2 bg-white text-xs mt-1 font-medium cursor-pointer h-9"
                         value={paymentMethod}
                         onChange={(e: any) => setPaymentMethod(e.target.value)}
                       >
@@ -2019,13 +2093,33 @@ export default function AdminTransactionsPage() {
                     </div>
 
                     <div>
-                      <Label className="text-xs font-bold text-slate-900">Payment Date</Label>
+                      <Label className="text-xs font-bold text-slate-900">Settlement Date</Label>
                       <Input
                         type="date"
                         value={paymentDate}
                         onChange={(e) => setPaymentDate(e.target.value)}
-                        className="bg-white mt-1 text-xs"
+                        className="bg-white mt-1 text-xs h-9"
                         required
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-bold text-slate-900">Settlement Time</Label>
+                        <button
+                          type="button"
+                          onClick={() => setPaymentTime(getCurrentTimeHM())}
+                          className="text-[10px] text-emerald-700 hover:text-emerald-800 hover:underline font-bold cursor-pointer flex items-center gap-0.5"
+                          title="Set to Current Time"
+                        >
+                          <Clock className="h-2.5 w-2.5" /> Now
+                        </button>
+                      </div>
+                      <Input
+                        type="time"
+                        value={paymentTime}
+                        onChange={(e) => setPaymentTime(e.target.value)}
+                        className="bg-white mt-1 text-xs font-mono h-9"
                       />
                     </div>
                   </div>
@@ -2207,7 +2301,15 @@ export default function AdminTransactionsPage() {
             <div className="grid grid-cols-2 gap-3 p-1.5 bg-slate-100 rounded-lg">
               <button
                 type="button"
-                onClick={() => setDemandCategory('monthly_payment')}
+                onClick={() => {
+                  setDemandCategory('monthly_payment');
+                  const settingsList = Array.isArray(settings) ? settings : (settings as any)?.data || [];
+                  const defaultMonthly =
+                    settingsList.find((s: any) => s.setting_key === 'monthly_subscription_default')?.setting_value ||
+                    settingsList.find((s: any) => s.setting_key === 'payment_amount_1')?.setting_value ||
+                    '2000';
+                  setDemandAmount(defaultMonthly);
+                }}
                 className={`py-2 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                   demandCategory === 'monthly_payment'
                     ? 'bg-white text-emerald-800 shadow-xs'
@@ -2220,7 +2322,15 @@ export default function AdminTransactionsPage() {
 
               <button
                 type="button"
-                onClick={() => setDemandCategory('one_time')}
+                onClick={() => {
+                  setDemandCategory('one_time');
+                  const settingsList = Array.isArray(settings) ? settings : (settings as any)?.data || [];
+                  const defaultOneTime =
+                    settingsList.find((s: any) => s.setting_key === 'one_time_payment_default')?.setting_value ||
+                    settingsList.find((s: any) => s.setting_key === 'payment_amount_2')?.setting_value ||
+                    '3000';
+                  setDemandAmount(defaultOneTime);
+                }}
                 className={`py-2 text-xs font-bold rounded-md transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                   demandCategory === 'one_time'
                     ? 'bg-white text-emerald-800 shadow-xs'

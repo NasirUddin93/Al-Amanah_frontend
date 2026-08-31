@@ -1,5 +1,6 @@
 import React from 'react';
 import type { Receipt } from '@/types';
+import { formatDateTime } from '@/lib/utils';
 
 export interface PaymentReferenceItem {
   ref: string;
@@ -21,38 +22,86 @@ export function ReceiptPrintArea({ receipt }: { receipt: (Receipt & { [key: stri
   if (!receipt) return null;
 
   const desc = receipt.transaction?.description || '';
+  const trxAny = (receipt.transaction || {}) as any;
+
+  // Determine settlement timestamp
+  const rawSettledTime =
+    receipt.updated_at ||
+    trxAny?.updated_at ||
+    receipt.created_at ||
+    trxAny?.created_at ||
+    receipt.receipt_date;
+
+  // Extract receipt photo uploaded at (slip received time)
+  const rawSlipUploadedTime =
+    trxAny?.receipt_photo_uploaded_at ||
+    (receipt as any)?.receipt_photo_uploaded_at;
+
+  // Extract billing due date
+  const billingDueDate =
+    trxAny?.transaction_date ||
+    (receipt as any)?.transaction_date ||
+    receipt.receipt_date;
+
+  // Determine who settled / confirmed the payment
+  const confirmedByStaff =
+    receipt.confirmed_by ||
+    receipt.creator ||
+    trxAny?.last_modified_by ||
+    trxAny?.updated_by ||
+    trxAny?.created_by ||
+    receipt.created_by;
+
+  const staffName =
+    typeof confirmedByStaff === 'object' && confirmedByStaff?.name
+      ? confirmedByStaff.name
+      : typeof confirmedByStaff === 'string'
+      ? confirmedByStaff
+      : 'Super Admin';
+
+  const staffRole =
+    typeof confirmedByStaff === 'object' && confirmedByStaff?.role
+      ? confirmedByStaff.role.replace(/_/g, ' ')
+      : 'Admin';
+
+  const staffId =
+    typeof confirmedByStaff === 'object'
+      ? confirmedByStaff.member_no ? `#${confirmedByStaff.member_no}` : (confirmedByStaff.id ? `#${confirmedByStaff.id}` : '')
+      : '';
   
-  // Detect partial payment either from explicitly attached props or from description text
-  let isPartial = Boolean(receipt.isPartial);
-  if (!isPartial && (/partial payment/i.test(desc) || /remaining due/i.test(desc))) {
-    isPartial = true;
-  }
-
-  // Parse total and due if not explicitly provided
-  let parsedAssigned = 0;
-  let parsedDue = 0;
-  const matchTotal = desc.match(/of\s+BDT\s+([\d,]+)/i);
-  if (matchTotal) {
-    parsedAssigned = Number(matchTotal[1].replace(/,/g, ''));
-  }
-  const matchDue = desc.match(/Due:\s*BDT\s*([\d,]+)/i);
-  if (matchDue) {
-    parsedDue = Number(matchDue[1].replace(/,/g, ''));
-  }
-
+  // 1. Installment amount paid in this specific receipt
   const installmentAmount = Number(receipt.installmentAmount || receipt.amount || 0);
 
-  // Overall demand target
-  let totalTargetAmount = Number(receipt.totalAssignedAmount || parsedAssigned || 0);
-
-  // Snapshot amounts for this specific payment record
+  // 2. Target and cumulative amounts
+  let totalTargetAmount = Number(receipt.totalAssignedAmount || 0);
   let cumulativePaidAmount = Number(receipt.totalPaidAmount || 0);
   let previousPaidAmount = Number(receipt.previousPaidAmount || 0);
-  let remainingDueAmount = Number(receipt.totalDueAmount !== undefined ? receipt.totalDueAmount : 0);
+  let remainingDueAmount = receipt.totalDueAmount !== undefined ? Number(receipt.totalDueAmount) : undefined;
 
+  // If total target not explicitly provided, attempt to parse from description
+  if (!totalTargetAmount) {
+    const matchTotal = desc.match(/of\s+BDT\s+([\d,]+)/i);
+    if (matchTotal) {
+      totalTargetAmount = Number(matchTotal[1].replace(/,/g, ''));
+    }
+  }
+
+  if (remainingDueAmount === undefined) {
+    const trxStatus = (receipt.transaction as any)?.status;
+    if (/remaining due/i.test(desc) && (!trxStatus || trxStatus === 'paid')) {
+      remainingDueAmount = 0;
+    } else {
+      const matchDue = desc.match(/Due:\s*BDT\s*([\d,]+)/i);
+      if (matchDue) {
+        remainingDueAmount = Number(matchDue[1].replace(/,/g, ''));
+      }
+    }
+  }
+
+  // Fallbacks for cumulative and previous amounts
   if (cumulativePaidAmount === 0) {
-    if (parsedAssigned > 0 && parsedDue > 0) {
-      cumulativePaidAmount = parsedAssigned - parsedDue;
+    if (totalTargetAmount > 0 && remainingDueAmount !== undefined && remainingDueAmount > 0) {
+      cumulativePaidAmount = Math.max(0, totalTargetAmount - remainingDueAmount);
     } else {
       cumulativePaidAmount = installmentAmount;
     }
@@ -63,17 +112,26 @@ export function ReceiptPrintArea({ receipt }: { receipt: (Receipt & { [key: stri
   }
 
   if (totalTargetAmount === 0) {
-    if (parsedAssigned > 0) {
-      totalTargetAmount = parsedAssigned;
-    } else if (remainingDueAmount > 0) {
+    if (remainingDueAmount !== undefined && remainingDueAmount > 0) {
       totalTargetAmount = cumulativePaidAmount + remainingDueAmount;
     } else {
       totalTargetAmount = cumulativePaidAmount;
     }
   }
 
-  if (remainingDueAmount === 0 && totalTargetAmount > cumulativePaidAmount) {
+  if (remainingDueAmount === undefined) {
     remainingDueAmount = Math.max(0, totalTargetAmount - cumulativePaidAmount);
+  }
+
+  // Critical fix: A receipt is only PARTIALLY PAID if there is actually remaining due > 0 and target > paid
+  let isPartial = false;
+  if (remainingDueAmount > 0 && totalTargetAmount > cumulativePaidAmount) {
+    isPartial = true;
+  } else if (receipt.isPartial === true && remainingDueAmount > 0) {
+    isPartial = true;
+  } else {
+    isPartial = false;
+    remainingDueAmount = 0;
   }
 
   // Extract user-inputted transaction reference (e.g. bKash/Nagad/Bank Ref inputted during slip submission or settlement)
@@ -120,6 +178,9 @@ export function ReceiptPrintArea({ receipt }: { receipt: (Receipt & { [key: stri
         <div>
           <div className="text-xs text-slate-500 uppercase font-semibold">Receipt No</div>
           <div className="text-base font-bold font-mono text-slate-900">{displayReceiptNo}</div>
+          <div className="text-[10px] text-slate-500 mt-0.5">
+            Billing Due: <span className="font-semibold text-slate-700">{billingDueDate}</span>
+          </div>
         </div>
 
         {/* Prominent Status Badge (Paid vs Partially Paid) */}
@@ -144,17 +205,55 @@ export function ReceiptPrintArea({ receipt }: { receipt: (Receipt & { [key: stri
         )}
 
         <div className="text-right">
-          <div className="text-xs text-slate-500 uppercase font-semibold">Payment Date</div>
-          <div className="text-sm font-bold text-slate-900">{receipt.receipt_date}</div>
+          <div className="text-[10px] text-slate-500 uppercase font-semibold">Settled Date &amp; Time</div>
+          <div className="text-xs font-bold text-slate-900 font-mono">{formatDateTime(rawSettledTime)}</div>
+          {rawSlipUploadedTime && (
+            <div className="text-[10px] text-blue-800 font-medium mt-0.5">
+              Slip Received: <span className="font-mono">{formatDateTime(rawSlipUploadedTime)}</span>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Receipt Details Table */}
       <div className="space-y-3 text-sm">
-        <div className="flex justify-between py-1.5 border-b border-slate-100">
+        <div className="flex justify-between py-1.5 border-b border-slate-100 items-center">
           <span className="text-slate-600 font-medium">Received From (Member):</span>
           <span className="font-bold text-slate-900">
             {receipt.member?.name || 'Member'} {receipt.member?.member_no ? `(${receipt.member.member_no})` : ''}
+          </span>
+        </div>
+
+        <div className="flex justify-between py-1.5 border-b border-slate-100 items-center">
+          <span className="text-slate-600 font-medium">Settled / Confirmed By:</span>
+          <span className="font-bold text-slate-900 flex items-center gap-1.5">
+            <span>{staffName}</span>
+            <span className="text-xs font-mono font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 uppercase">
+              {staffRole} {staffId}
+            </span>
+          </span>
+        </div>
+
+        <div className="flex justify-between py-1.5 border-b border-slate-100 items-center">
+          <span className="text-slate-600 font-medium">Settlement Date &amp; Time:</span>
+          <span className="font-mono font-bold text-emerald-900 text-xs">
+            {formatDateTime(rawSettledTime)}
+          </span>
+        </div>
+
+        {rawSlipUploadedTime && (
+          <div className="flex justify-between py-1.5 border-b border-slate-100 items-center">
+            <span className="text-slate-600 font-medium">Payment Slip Received Time:</span>
+            <span className="font-mono font-semibold text-blue-900 text-xs">
+              {formatDateTime(rawSlipUploadedTime)}
+            </span>
+          </div>
+        )}
+
+        <div className="flex justify-between py-1.5 border-b border-slate-100 items-center">
+          <span className="text-slate-600 font-medium">Billing Due Date:</span>
+          <span className="font-medium text-slate-800">
+            {billingDueDate}
           </span>
         </div>
 
@@ -218,6 +317,90 @@ export function ReceiptPrintArea({ receipt }: { receipt: (Receipt & { [key: stri
           </span>
         </div>
 
+        {/* Admin / Accountant Comments or Settlement Remarks */}
+        {(() => {
+          const trxAny = (receipt.transaction || {}) as any;
+          const rawAdminNote =
+            (receipt as any).admin_note ||
+            (receipt as any).accountant_note ||
+            (receipt as any).admin_comment ||
+            (receipt as any).accountant_comment ||
+            (receipt as any).staff_comment ||
+            (receipt as any).notes ||
+            (receipt as any).note ||
+            trxAny?.admin_note ||
+            trxAny?.accountant_note ||
+            trxAny?.admin_comment ||
+            trxAny?.accountant_comment ||
+            trxAny?.staff_comment ||
+            trxAny?.notes ||
+            trxAny?.note;
+
+          let noteFromDesc = '';
+          if (desc && /(?:admin|accountant|officer|staff)?\s*note:\s*/i.test(desc)) {
+            const match = desc.match(/(?:admin|accountant|officer|staff)?\s*note:\s*([^|\n-]+)/i);
+            if (match && match[1]) {
+              noteFromDesc = match[1].trim();
+            }
+          }
+
+          const rawCombined = rawAdminNote || noteFromDesc;
+          if (!rawCombined) return null;
+
+          // Strip redundant leading prefixes
+          let cleanNote = String(rawCombined).trim();
+          cleanNote = cleanNote.replace(/^(?:(?:admin|accountant|staff)\s+)?(?:note|remarks|comment)s?\s*[:\-–—]\s*/i, '').trim();
+          cleanNote = cleanNote.replace(/(?:^|\|\s*)Ref:\s*[^|\n-]+(?:\s*\||$)/gi, '').trim();
+          cleanNote = cleanNote.replace(/^\|\s*|\s*\|$/g, '').trim();
+
+          if (!cleanNote || cleanNote === '-') return null;
+
+          return (
+            <div className="flex justify-between py-2 border-b border-slate-100 items-start bg-slate-50/50 px-2 rounded-md my-0.5">
+              <span className="text-slate-700 font-bold text-xs uppercase tracking-wide flex items-center gap-1">
+                Admin / Accountant Comments:
+              </span>
+              <span className="font-semibold text-slate-900 text-right max-w-[65%] text-xs leading-relaxed">
+                {cleanNote}
+              </span>
+            </div>
+          );
+        })()}
+
+        {/* Member Note / Comment */}
+        {(() => {
+          const rawComment =
+            (receipt.transaction as any)?.member_comment ||
+            (receipt as any).member_comment ||
+            (receipt as any).comment;
+
+          let noteFromDesc = '';
+          if (!rawComment && desc && /note:\s*/i.test(desc) && !/(?:admin|accountant|officer)\s*note:\s*/i.test(desc)) {
+            const match = desc.match(/(?:Note|Comment):\s*([^|\n]+)/i);
+            if (match && match[1]) {
+              noteFromDesc = match[1].trim();
+            }
+          }
+
+          const rawCombined = rawComment || noteFromDesc;
+          if (!rawCombined) return null;
+
+          let cleanComment = String(rawCombined).trim();
+          cleanComment = cleanComment.replace(/^(?:member\s+)?(?:comment|note|remarks)s?\s*[:\-–—]\s*/i, '').trim();
+          cleanComment = cleanComment.replace(/(?:^|\|\s*)Ref:\s*[^|\n-]+(?:\s*\||$)/gi, '').trim();
+
+          if (!cleanComment || cleanComment === '-') return null;
+
+          return (
+            <div className="flex justify-between py-1.5 border-b border-slate-100 items-start">
+              <span className="text-slate-600 font-medium">Member Comment / Note:</span>
+              <span className="font-medium text-slate-700 italic text-right max-w-[65%]">
+                &ldquo;{cleanComment}&rdquo;
+              </span>
+            </div>
+          );
+        })()}
+
         {/* Amount Breakdown Box */}
         {isPartial ? (
           <div className="mt-6 p-4 rounded-lg bg-purple-50/60 border border-purple-200 space-y-2">
@@ -258,6 +441,36 @@ export function ReceiptPrintArea({ receipt }: { receipt: (Receipt & { [key: stri
               </span>
             </div>
           </div>
+        ) : previousPaidAmount > 0 ? (
+          <div className="mt-6 p-4 rounded-lg bg-emerald-50/70 border border-emerald-200 space-y-2">
+            <div className="flex justify-between items-center pb-2 border-b border-emerald-200/80">
+              <span className="text-xs font-bold text-emerald-950 uppercase tracking-wide">Paid (This Final Installment):</span>
+              <span className="text-lg font-black text-emerald-950 font-mono">
+                BDT {installmentAmount.toLocaleString()}
+              </span>
+            </div>
+
+            <div className="flex justify-between items-center text-xs text-slate-700 pt-0.5">
+              <span className="font-semibold text-slate-600">Previously Paid Installment(s):</span>
+              <span className="font-bold font-mono text-slate-900">
+                BDT {previousPaidAmount.toLocaleString()}
+              </span>
+            </div>
+
+            <div className="flex justify-between items-center text-xs text-slate-700 pt-0.5">
+              <span className="font-semibold text-slate-600">Total Demand Target:</span>
+              <span className="font-bold font-mono text-slate-900">
+                BDT {totalTargetAmount.toLocaleString()}
+              </span>
+            </div>
+
+            <div className="flex justify-between items-center text-xs text-emerald-900 font-bold pt-2 border-t border-emerald-200">
+              <span className="uppercase tracking-wider">Total Amount Cleared in Full:</span>
+              <span className="font-mono text-base text-emerald-950 font-black">
+                BDT {cumulativePaidAmount.toLocaleString()}
+              </span>
+            </div>
+          </div>
         ) : (
           <div className="mt-6 p-4 rounded-lg bg-slate-50 border border-slate-200 flex justify-between items-center">
             <span className="text-base font-bold text-slate-800 uppercase tracking-wide">Total Amount Paid:</span>
@@ -268,16 +481,36 @@ export function ReceiptPrintArea({ receipt }: { receipt: (Receipt & { [key: stri
         )}
       </div>
 
-      {/* Footer Signatures */}
-      <div className="mt-20 pt-8 flex justify-between text-xs text-slate-700">
-        <div className="text-center">
-          <div className="w-44 border-t border-slate-800 pt-1.5 font-semibold">Authorized Collector / Admin</div>
-          <span className="text-[10px] text-slate-500">Al-Amanah Management</span>
+      {/* Footer Signatures & Staff Audit Details */}
+      <div className="mt-16 pt-6 flex justify-between text-xs text-slate-700">
+        <div className="text-center w-56">
+          <div className="border-t-2 border-slate-800 pt-1.5 font-bold text-slate-900 text-sm">
+            {staffName}
+          </div>
+          <div className="text-[11px] text-emerald-900 font-semibold capitalize mt-0.5">
+            {staffRole} {staffId ? `(${staffId})` : ''}
+          </div>
+          <div className="text-[10px] text-slate-600 font-mono mt-0.5">
+            Settled: {formatDateTime(rawSettledTime)}
+          </div>
+          <span className="text-[9px] text-slate-500 uppercase tracking-wider block mt-1 font-bold">
+            Authorized Collector / Settled By
+          </span>
         </div>
 
-        <div className="text-center">
-          <div className="w-44 border-t border-slate-800 pt-1.5 font-semibold">Member Signature</div>
-          <span className="text-[10px] text-slate-500">Received By Member</span>
+        <div className="text-center w-56">
+          <div className="border-t-2 border-slate-800 pt-1.5 font-bold text-slate-900 text-sm">
+            {receipt.member?.name || 'Member'}
+          </div>
+          <div className="text-[11px] text-slate-700 font-medium mt-0.5">
+            Member ID: {receipt.member?.member_no || 'Unassigned'}
+          </div>
+          <div className="text-[10px] text-slate-500 mt-0.5">
+            Official Signature / Acknowledgment
+          </div>
+          <span className="text-[9px] text-slate-500 uppercase tracking-wider block mt-1 font-bold">
+            Member Signature
+          </span>
         </div>
       </div>
 
