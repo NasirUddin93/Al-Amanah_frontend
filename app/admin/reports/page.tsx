@@ -1105,6 +1105,17 @@ function ReportHierarchyManagerContent() {
       };
     });
 
+    const firstItem = monthGroup.items[0];
+    const rawReceipt = firstItem?.rawReceipt;
+    const rawTrx = firstItem?.rawTransaction;
+
+    const confirmedByObj = rawReceipt?.confirmed_by || rawReceipt?.creator;
+    const confirmedByName = typeof confirmedByObj === 'object' && confirmedByObj?.name ? confirmedByObj.name : typeof confirmedByObj === 'string' ? confirmedByObj : 'Super Admin';
+    const confirmedRole = typeof confirmedByObj === 'object' && confirmedByObj?.role ? confirmedByObj.role.replace(/_/g, ' ') : 'Admin';
+
+    const rawSettled = rawReceipt?.updated_at || rawReceipt?.created_at || (rawTrx as any)?.updated_at || (rawTrx as any)?.created_at || firstItem?.date || new Date().toLocaleDateString();
+    const rawSlipUploaded = (rawTrx as any)?.receipt_photo_uploaded_at || (rawReceipt as any)?.receipt_photo_uploaded_at;
+
     const sections: PrintSection[] = [
       {
         memberId: member.memberId,
@@ -1116,10 +1127,18 @@ function ReportHierarchyManagerContent() {
         monthSections: [
           {
             monthTitle: monthGroup.monthLabel,
-            campaignTrxNo: monthGroup.campaignTrxNo,
+            campaignTrxNo: monthGroup.campaignTrxNo || (firstItem?.rawReceipt?.receipt_no) || (firstItem?.transactionNo),
             subTotalAssessed,
             subTotalPaid,
             subTotalDue,
+            paymentMethod: firstItem?.paymentMethod || (firstItem?.rawReceipt?.payment_method) || 'Cash',
+            billingDueDate: firstItem?.date || monthGroup.items[0]?.date || '-',
+            settledTime: rawSettled,
+            slipReceivedTime: rawSlipUploaded,
+            confirmedBy: confirmedByName,
+            confirmedRole: confirmedRole,
+            adminComment: (firstItem?.rawReceipt as any)?.admin_comment || (firstItem?.rawTransaction as any)?.admin_comment || (firstItem?.rawReceipt as any)?.admin_note || '',
+            memberComment: (firstItem?.rawReceipt as any)?.comment || (firstItem?.rawTransaction as any)?.member_comment || '',
             rows,
           },
         ],
