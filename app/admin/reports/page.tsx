@@ -1109,7 +1109,7 @@ function ReportHierarchyManagerContent() {
     const rawReceipt = firstItem?.rawReceipt;
     const rawTrx = firstItem?.rawTransaction;
 
-    const confirmedByObj = rawReceipt?.confirmed_by || rawReceipt?.creator;
+    const confirmedByObj = rawReceipt?.confirmed_by || rawReceipt?.created_by;
     const confirmedByName = typeof confirmedByObj === 'object' && confirmedByObj?.name ? confirmedByObj.name : typeof confirmedByObj === 'string' ? confirmedByObj : 'Super Admin';
     const confirmedRole = typeof confirmedByObj === 'object' && confirmedByObj?.role ? confirmedByObj.role.replace(/_/g, ' ') : 'Admin';
 
