@@ -165,12 +165,197 @@ export function ReceiptPrintArea({ receipt }: { receipt: (Receipt & { [key: stri
     displayReceiptNo = receipt.transaction?.transaction_no || receipt.transaction?.month || '-';
   }
 
+  const documentId = `AM-RCT-${receipt.member?.member_no || receipt.member?.id || '001'}-${new Date().getFullYear()}`;
+  const issueDateFormatted = formatDateTime(rawSettledTime);
+
   return (
     <div className="hidden print:block bg-white p-8 max-w-2xl mx-auto text-slate-900 font-sans">
-      {/* Header */}
-      <div className="text-center border-b-2 border-slate-800 pb-5 mb-6">
-        <h1 className="text-2xl font-black tracking-tight text-slate-900 uppercase">Al-Amanah Society</h1>
-        <p className="text-xs font-semibold text-slate-600 tracking-wider uppercase mt-0.5">Official Money Receipt</p>
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+        @import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;600;700;800&display=swap');
+        
+        .mono-figures {
+          font-family: 'JetBrains Mono', monospace !important;
+          font-variant-numeric: tabular-nums;
+          white-space: nowrap !important;
+        }
+
+        .bengali-font {
+          font-family: 'Hind Siliguri', sans-serif !important;
+        }
+
+        @media print {
+          @page {
+            size: A4 portrait !important;
+            margin: 10mm 12mm !important;
+          }
+          html, body {
+            background: #ffffff !important;
+            color: #0f172a !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+        }
+      `,
+        }}
+      />
+
+      {/* 1. MASTER LETTERHEAD & EXECUTIVE METADATA */}
+      <div style={{ display: 'flex', flexDirection: 'column', marginBottom: '12px' }}>
+        {/* Top Security Ribbon */}
+        <div
+          style={{
+            backgroundColor: '#064e3b',
+            backgroundImage: 'linear-gradient(90deg, #022c22 0%, #064e3b 60%, #047857 100%)',
+            color: '#ffffff',
+            padding: '6px 12px',
+            borderRadius: '4px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            fontSize: '10px',
+            fontWeight: 700,
+            letterSpacing: '0.04em',
+            borderBottom: '2px solid #10b981',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ display: 'inline-block', width: '5px', height: '5px', borderRadius: '50%', backgroundColor: '#34d399' }}></span>
+            <span style={{ color: '#d1fae5' }}>AL-AMANAH AUDITED FINANCIAL STATEMENT</span>
+            <span style={{ color: '#6ee7b7' }}>•</span>
+            <span style={{ color: '#a7f3d0', fontWeight: 500 }}>ESTABLISHED JULY 01, 2026</span>
+          </div>
+          <div className="mono-figures" style={{ color: '#ffffff', fontSize: '10px' }}>
+            RECONCILED AUDIT EDITION
+          </div>
+        </div>
+
+        {/* Letterhead Branding */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0 8px 0', borderBottom: '2px solid #064e3b', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
+            <div
+              className="bengali-font"
+              style={{
+                width: '46px',
+                height: '46px',
+                borderRadius: '8px',
+                backgroundColor: '#064e3b',
+                border: '2px solid #059669',
+                boxShadow: '0 2px 5px rgba(6,78,59,0.25)',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '24px',
+                fontWeight: 900,
+                flexShrink: 0,
+              }}
+            >
+              আ
+            </div>
+            <div>
+              <h1 style={{ fontSize: '17px', fontWeight: 900, color: '#022c22', margin: 0, textTransform: 'uppercase', letterSpacing: '-0.02em' }}>
+                Al-Amanah Savings &amp; Welfare Society
+              </h1>
+              <div className="bengali-font" style={{ fontSize: '13px', fontWeight: 700, color: '#047857', marginTop: '1px' }}>
+                আল-আমানাহ সঞ্চয় ও কল্যাণ সোসাইটি — ঐক্যই শক্তি
+              </div>
+              <div style={{ fontSize: '9.5px', color: '#475569', marginTop: '3px', lineHeight: 1.35 }}>
+                <div style={{ fontWeight: 500 }}>
+                  📍 Munshihati (2nd Floor, Holy Touch Ideal School), Kamrangirchar, Dhaka – 1211
+                </div>
+                <div style={{ fontSize: '9px', color: '#64748b', fontWeight: 600, marginTop: '2px' }}>
+                  Reg: <strong style={{ color: '#0f172a' }}>COOP-DHK-2018/8892</strong> &nbsp;•&nbsp; TIN: <strong style={{ color: '#0f172a' }}>7781-9920-01</strong> &nbsp;•&nbsp; Non-Political • Mutual-Aid
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Statement ID Card Box */}
+          <div
+            style={{
+              border: '1.5px solid #065f46',
+              borderRadius: '6px',
+              padding: '6px 10px',
+              minWidth: '195px',
+              backgroundColor: '#f0fdf4',
+              boxShadow: '0 2px 4px rgba(6,78,59,0.05)',
+              flexShrink: 0,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #86efac', paddingBottom: '3px', marginBottom: '3px' }}>
+              <span style={{ fontSize: '8.5px', fontWeight: 800, textTransform: 'uppercase', color: '#064e3b', letterSpacing: '0.04em' }}>Document ID</span>
+              <span className="mono-figures" style={{ fontSize: '10.5px', fontWeight: 800, color: '#022c22' }}>
+                {documentId}
+              </span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginTop: '3px' }}>
+              <span style={{ color: '#475569', fontWeight: 600 }}>Issue Date:</span>
+              <span className="mono-figures" style={{ fontWeight: 700, color: '#0f172a' }}>{issueDateFormatted.split(',')[0]}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginTop: '3px' }}>
+              <span style={{ color: '#475569', fontWeight: 600, paddingRight: '4px' }}>Scope:</span>
+              <span style={{ fontWeight: 700, color: '#047857' }}>
+                Official Money Receipt
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Statement Subject Banner */}
+        <div
+          style={{
+            backgroundColor: '#022c22',
+            backgroundImage: 'linear-gradient(90deg, #022c22 0%, #064e3b 100%)',
+            color: '#ffffff',
+            borderRadius: '6px',
+            padding: '6px 10px',
+            margin: '6px 0',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}
+        >
+          <div>
+            <div style={{ fontSize: '8px', fontWeight: 800, color: '#34d399', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '1px' }}>
+              Statement Scope
+            </div>
+            <div style={{ fontSize: '12px', fontWeight: 800, color: '#ffffff' }}>
+              {receipt.member?.name ? `${receipt.member.name} - Official Subscription & Money Receipt` : 'Official Member Subscription & Money Receipt'}
+            </div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: '8px', fontWeight: 600, color: '#a7f3d0', textTransform: 'uppercase', marginBottom: '1px' }}>Billing Period</div>
+            <div style={{ fontSize: '10.5px', fontWeight: 600, color: '#e2e8f0' }}>
+              {receipt.transaction?.month || 'Subscription Cycle'}
+            </div>
+          </div>
+        </div>
+
+        {/* Shariah Motto Card */}
+        <div
+          style={{
+            backgroundColor: '#ecfdf5',
+            borderLeft: '4px solid #059669',
+            borderRight: '1px solid #a7f3d0',
+            borderTop: '1px solid #a7f3d0',
+            borderBottom: '1px solid #a7f3d0',
+            borderRadius: '4px',
+            padding: '5px 10px',
+            marginBottom: '6px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}
+        >
+          <span style={{ fontSize: '9.5px', color: '#064e3b', fontStyle: 'italic', fontWeight: 500 }}>
+            &ldquo;And those who are faithfully true to their trusts (Amanat) and to their covenants.&rdquo;
+          </span>
+          <span style={{ color: '#047857', fontWeight: 800, fontSize: '8px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            Surah Al-Mu&rsquo;minun [23:8] • 100% Shariah Compliant
+          </span>
+        </div>
       </div>
 
       {/* Paid / Partially Paid Status Stamp & Top Meta */}
