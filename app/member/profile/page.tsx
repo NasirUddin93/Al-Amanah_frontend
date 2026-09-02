@@ -17,6 +17,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
+import { getSecurePhotoUrl } from '@/lib/utils';
+import { SecureImage } from '@/components/secure-image';
 import {
   Dialog,
   DialogContent,
@@ -190,12 +192,15 @@ function MemberProfileContent() {
     return mergedGroups.find((g) => g.memberIds.includes(activeUser.id));
   }, [activeUser, mergedGroups]);
 
+  const token = useAppSelector((s) => s.auth.token);
+
   // User Document Photos
   const userPhotos: string[] = useMemo(() => {
     if (!activeUser) return [];
     const photos: string[] = [];
-    if (activeUser.member_profile?.id_photo || (activeUser as any).id_photo) {
-      photos.push(activeUser.member_profile?.id_photo || (activeUser as any).id_photo);
+    const mainPhoto = activeUser.member_profile?.id_photo || (activeUser as any).id_photo;
+    if (mainPhoto) {
+      photos.push(getSecurePhotoUrl(mainPhoto, token));
     }
     const extraPhotos =
       activeUser.member_profile?.id_photos ||
@@ -204,11 +209,14 @@ function MemberProfileContent() {
       [];
     if (Array.isArray(extraPhotos)) {
       extraPhotos.forEach((p) => {
-        if (p && typeof p === 'string' && !photos.includes(p)) photos.push(p);
+        if (p && typeof p === 'string') {
+          const secured = getSecurePhotoUrl(p, token);
+          if (!photos.includes(secured)) photos.push(secured);
+        }
       });
     }
     return photos;
-  }, [activeUser]);
+  }, [activeUser, token]);
 
   const [viewPhotoIndex, setViewPhotoIndex] = useState<number>(0);
 
@@ -413,8 +421,7 @@ function MemberProfileContent() {
               />
 
               {/* Active Full Uncropped Photo */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
+              <SecureImage
                 src={userPhotos[viewPhotoIndex] || userPhotos[0]}
                 alt="Member ID Document"
                 className="relative z-0 w-full h-full object-contain p-4 md:p-6 transition-all duration-300 drop-shadow-2xl"
@@ -475,8 +482,7 @@ function MemberProfileContent() {
                             : 'border-white/40 opacity-70 hover:opacity-100'
                         }`}
                       >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={photo} alt={`thumb ${idx}`} className="w-full h-full object-cover" />
+                        <SecureImage src={photo} alt={`thumb ${idx}`} className="w-full h-full object-cover" />
                       </button>
                     ))}
                   </div>

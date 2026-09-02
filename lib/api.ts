@@ -3,10 +3,13 @@ import type * as T from '@/types';
 
 const baseQuery = fetchBaseQuery({
   baseUrl: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api',
-  prepareHeaders: (headers) => {
-    if (typeof window !== 'undefined') {
-      const token = localStorage.getItem('token');
-      if (token) headers.set('Authorization', `Bearer ${token}`);
+  prepareHeaders: (headers, { getState }) => {
+    let token = (getState() as any)?.auth?.token;
+    if (!token && typeof window !== 'undefined') {
+      token = localStorage.getItem('token');
+    }
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
     }
     headers.set('Accept', 'application/json');
     return headers;

@@ -79,6 +79,7 @@ export interface Receipt {
   receipt_date: string;
   member?: { id: number; name: string; member_no?: string; email?: string; phone?: string };
   created_by?: AdminModifier | string;
+  creator?: AdminModifier;
   confirmed_by?: AdminModifier;
   transaction?: {
     id: number;

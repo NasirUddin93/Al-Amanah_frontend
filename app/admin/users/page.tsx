@@ -24,6 +24,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
+import { getSecurePhotoUrl } from '@/lib/utils';
+import { SecureImage, fetchSecureBlobUrl } from '@/components/secure-image';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import {
@@ -183,6 +185,7 @@ export default function AdminUsersPage() {
 
 function UsersContent() {
   const currentUser = useAppSelector((s) => s.auth.user);
+  const token = useAppSelector((s) => s.auth.token);
   const isSuperAdmin = currentUser?.role?.name === 'super_admin';
 
   const [page, setPage] = useState(1);
@@ -418,6 +421,7 @@ function UsersContent() {
     } else if (user.member_profile?.id_photo) {
       existingPhotos = [user.member_profile.id_photo];
     }
+    existingPhotos = existingPhotos.map((p) => getSecurePhotoUrl(p, token));
 
     setIdPhotosList(existingPhotos);
     setActivePhotoIndex(0);
@@ -795,11 +799,15 @@ function UsersContent() {
                             }}
                             title="Click to view full details & photos"
                           >
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
+                            <SecureImage
                               src={user.member_profile.id_photo}
                               alt={user.name}
                               className="h-full w-full object-cover transition-transform group-hover:scale-110"
+                              fallback={
+                                <div className="h-full w-full bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold text-xs">
+                                  {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
+                                </div>
+                              }
                             />
                             {photoCount > 1 && (
                               <span className="absolute bottom-0 right-0 bg-black/80 text-[9px] font-bold text-white px-1 py-0.2 rounded-tl-sm">
@@ -1052,11 +1060,12 @@ function UsersContent() {
       >
         <DialogContent className="max-w-6xl w-full p-0 overflow-hidden max-h-[92vh] flex flex-col md:flex-row border border-slate-200 shadow-2xl rounded-3xl bg-white">
           {viewingUser && (() => {
-            const userPhotos: string[] = viewingUser.member_profile?.id_photos?.length
+            const rawPhotos: string[] = viewingUser.member_profile?.id_photos?.length
               ? viewingUser.member_profile.id_photos
               : viewingUser.member_profile?.id_photo
               ? [viewingUser.member_profile.id_photo]
               : [];
+            const userPhotos: string[] = rawPhotos.map((p) => getSecurePhotoUrl(p, token));
             const currentPhoto = userPhotos[viewPhotoIndex] || userPhotos[0];
 
             return (
@@ -1072,8 +1081,7 @@ function UsersContent() {
                       />
 
                       {/* Full-Height Image */}
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
+                      <SecureImage
                         src={currentPhoto}
                         alt={`${viewingUser.name} document ${viewPhotoIndex + 1}`}
                         className="relative z-0 w-full h-full object-contain p-4 md:p-6 transition-all duration-300 drop-shadow-2xl"
@@ -1133,8 +1141,7 @@ function UsersContent() {
                                     : 'border-white/40 opacity-70 hover:opacity-100'
                                 }`}
                               >
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src={photo} alt={`thumb ${idx}`} className="w-full h-full object-cover" />
+                                <SecureImage src={photo} alt={`thumb ${idx}`} className="w-full h-full object-cover" />
                               </button>
                             ))}
                           </div>

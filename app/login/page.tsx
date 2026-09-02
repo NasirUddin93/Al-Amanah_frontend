@@ -43,11 +43,11 @@ export default function LoginPage() {
 
   const handleQuickLogin = async () => {
     setValue('email', 'superadmin@alamanah.com');
-    setValue('password', 'password');
+    setValue('password', '11111111');
     try {
       const res = await login({
         email: 'superadmin@alamanah.com',
-        password: 'password',
+        password: '11111111',
       }).unwrap();
       dispatch(setCredentials(res));
       routeUserByRole(res.user);
