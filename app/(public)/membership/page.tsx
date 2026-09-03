@@ -1,15 +1,31 @@
+'use client';
 import React from 'react';
 import Reveal from '@/components/public/reveal';
-import SectionHead from '@/components/public/section-head';
+import { useLanguage } from '@/components/language-context';
+import { TRANSLATIONS } from '@/lib/translations';
 
 export default function MembershipPage() {
+  const { lang, isBn } = useLanguage();
+  const t = TRANSLATIONS[lang];
+
+  const steps = [
+    { n: '01', t: t.membership.step1Title, d: t.membership.step1Desc },
+    { n: '02', t: t.membership.step2Title, d: t.membership.step2Desc },
+    { n: '03', t: t.membership.step3Title, d: t.membership.step3Desc },
+    { n: '04', t: t.membership.step4Title, d: t.membership.step4Desc },
+  ];
+
   return (
     <>
       <div className="page-hero">
         <div className="container">
-          <span className="sec-tag">Membership</span>
-          <h1 className="sec-title">Join the <span className="g">Family of Guardians</span></h1>
-          <p className="sec-sub" style={{ marginInline: 'auto' }}>Open to every permanent citizen of Bangladesh who pledges unconditional adherence to the society’s Constitution.</p>
+          <span className="sec-tag">{t.membership.heroTag}</span>
+          <h1 className="sec-title">
+            {t.membership.heroTitle} <span className="g">{t.membership.heroTitleAccent}</span>
+          </h1>
+          <p className="sec-sub" style={{ marginInline: 'auto' }}>
+            {t.membership.heroSub}
+          </p>
         </div>
       </div>
 
@@ -18,33 +34,28 @@ export default function MembershipPage() {
           <div className="grid-2" style={{ alignItems: 'start', gap: 50 }}>
             <Reveal>
               <div className="check-card">
-                <h3 style={{ fontSize: 20, marginBottom: 20 }}>✅ Eligibility & Documents</h3>
+                <h3 style={{ fontSize: 20, marginBottom: 20 }}>{t.membership.eligibilityTitle}</h3>
                 <ul className="check-list">
-                  {[
-                    'Permanent citizen of Bangladesh.',
-                    'Pledge to follow all rules & regulations of the Constitution.',
-                    '1 photocopy of National ID / Voter ID card.',
-                    '2 passport-size photographs of the applicant.',
-                    '1 passport-size photograph of the nominee.',
-                    'Prescribed Membership Form addressed to the President.',
-                    'Immediate notification upon any address change.',
-                  ].map((t) => (<li key={t}><span className="tick">✓</span>{t}</li>))}
+                  {t.membership.eligibilityList.map((item) => (
+                    <li key={item}>
+                      <span className="tick">✓</span>
+                      {item}
+                    </li>
+                  ))}
                 </ul>
-                <div className="fee-strip">💳 Non-refundable application form fee: <b>BDT 200</b></div>
+                <div className="fee-strip">{t.membership.feeStrip}</div>
               </div>
             </Reveal>
 
             <Reveal delay={150}>
               <div>
-                {[
-                  ['01', 'Submit Application', 'Complete the prescribed Membership Form addressed to the President with all attachments.'],
-                  ['02', 'Pay Admission Fee', 'Pay the BDT 200 form fee and attach NID copy, photographs and nominee details.'],
-                  ['03', 'Verification & Approval', 'The Executive Council reviews, verifies and formally approves enrollment with a Membership ID.'],
-                  ['04', 'Enjoy Full Rights', 'Full voting rights in elections and proportionate profit/loss sharing from your joining date.'],
-                ].map(([n, t, d]) => (
+                {steps.map(({ n, t: title, d: desc }) => (
                   <div className="step" key={n}>
-                    <div className="step-num">{n}</div>
-                    <div><b>{t}</b><p>{d}</p></div>
+                    <div className="step-num">{isBn ? (n === '01' ? '০১' : n === '02' ? '০২' : n === '03' ? '০৩' : '০৪') : n}</div>
+                    <div>
+                      <b>{title}</b>
+                      <p>{desc}</p>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -53,8 +64,8 @@ export default function MembershipPage() {
 
           <Reveal delay={200}>
             <div className="cta-box" style={{ marginTop: 70 }}>
-              <h2>Resignation & Settlement Policy</h2>
-              <p>Written resignation to the President → inquiry committee review (Executive Council + Investment Board) → Executive decision is final & binding → all settlements finalized within <b>15 days</b>, subject to reserve liquidity. Re-joining members forfeit the “Founding Member” status.</p>
+              <h2>{t.membership.resignationTitle}</h2>
+              <p>{t.membership.resignationDesc}</p>
             </div>
           </Reveal>
         </div>
@@ -62,3 +73,4 @@ export default function MembershipPage() {
     </>
   );
 }
+

@@ -22,6 +22,8 @@ import { ReceiptPrintArea } from '@/components/receipt-print';
 import { ReportPrintArea, type PrintingReportData, type PrintSection, type PrintMonthSection } from '@/components/report-print';
 import { ReceiptSlipThumbnail, MagnifiableModalImage } from '@/components/receipt-magnifier';
 import type { Receipt, User, Transaction } from '@/types';
+import { useLanguage } from '@/components/language-context';
+import { MEMBER_TRANSLATIONS } from '@/lib/member-translations';
 import {
   Users,
   ArrowRight,
@@ -58,7 +60,14 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
-import { formatDateTime, formatDate } from '@/lib/utils';
+import {
+  formatDateTime,
+  formatDate,
+  formatMonthI18n,
+  formatPaymentCategoryI18n,
+  formatDemandTitleI18n,
+  toBengaliDigits,
+} from '@/lib/utils';
 
 function extractReferenceId(trx?: any, receipt?: any): string {
   // If no slip is uploaded for this row, do not show any reference ID
@@ -94,6 +103,8 @@ function extractReferenceId(trx?: any, receipt?: any): string {
 }
 
 export default function MemberDashboardPage() {
+  const { lang, isBn } = useLanguage();
+  const t = MEMBER_TRANSLATIONS[lang];
   const user = useAppSelector((s) => s.auth.user);
   const [activeTab, setActiveTab] = useState<'receipts' | 'transactions' | 'fdrs' | 'notifs' | 'profile'>('transactions');
   const [printReceipt, setPrintReceipt] = useState<Receipt | null>(null);
@@ -643,11 +654,11 @@ export default function MemberDashboardPage() {
                   <h1 className="text-2xl font-bold tracking-tight">{user?.name}</h1>
                   {user?.member_profile?.member_no && (
                     <span className="font-mono text-xs font-bold bg-emerald-950/60 border border-emerald-400/40 text-emerald-200 px-2.5 py-0.5 rounded-full">
-                      ID: {user.member_profile.member_no}
+                      {t.profile.memberId}: {user.member_profile.member_no}
                     </span>
                   )}
                   <span className="text-xs font-semibold bg-emerald-500/30 border border-emerald-300/30 text-emerald-100 px-2 py-0.5 rounded-full">
-                    {user?.is_active ? 'Active Member' : 'Inactive'}
+                    {user?.is_active ? (isBn ? 'সক্রিয় সম্মানিত সদস্য' : 'Active Member') : (isBn ? 'নিষ্ক্রিয়' : 'Inactive')}
                   </span>
                 </div>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-emerald-100/80 pt-1">
@@ -674,7 +685,7 @@ export default function MemberDashboardPage() {
                 className="bg-white hover:bg-emerald-50 text-emerald-950 font-bold px-4 py-2.5 text-xs sm:text-sm rounded-xl shadow-md flex items-center gap-2 cursor-pointer transition-all hover:scale-[1.02] shrink-0"
               >
                 <Printer className="h-4 w-4 text-emerald-700" />
-                Print Statement
+                {isBn ? 'স্টেটমেন্ট প্রিন্ট' : 'Print Statement'}
               </Button>
             </div>
           </div>
@@ -687,13 +698,14 @@ export default function MemberDashboardPage() {
               <AlertCircle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
               <div className="space-y-1">
                 <h3 className="text-sm font-bold text-amber-900 flex items-center gap-2">
-                  <span>Pending Payment Dues</span>
+                  <span>{isBn ? 'বকেয়া পরিশোধের নোটিশ' : 'Pending Payment Dues'}</span>
                   <span className="bg-amber-200 text-amber-900 text-[11px] px-2 py-0.2 rounded-full font-bold">
-                    {pendingTransactions.length} Pending
+                    {pendingTransactions.length} {isBn ? 'টি বকেয়া' : 'Pending'}
                   </span>
                 </h3>
                 <p className="text-xs text-amber-800">
-                  Total outstanding payment due: <b className="text-slate-900">BDT {pendingAmount.toLocaleString()}</b>
+                  {isBn ? 'সর্বমোট প্রদেয় বকেয়ার পরিমাণ:' : 'Total outstanding payment due:'}{' '}
+                  <b className="text-slate-900">{isBn ? '৳ ' : 'BDT '}{pendingAmount.toLocaleString()}</b>
                 </p>
                 <div className="flex flex-wrap gap-1.5 pt-1">
                   {pendingTransactions.map((pt) => (
@@ -702,7 +714,7 @@ export default function MemberDashboardPage() {
                       className="text-[11px] font-semibold bg-white border border-amber-300 text-amber-950 px-2 py-0.5 rounded shadow-2xs flex items-center gap-1"
                     >
                       <Clock className="h-3 w-3 text-amber-600 inline" />
-                      {pt.month ? pt.month : pt.description || 'Payment'}: <b>BDT {Number(pt.amount).toLocaleString()}</b>
+                      {pt.month ? pt.month : pt.description || (isBn ? 'পেমেন্ট' : 'Payment')}: <b>{isBn ? '৳ ' : 'BDT '}{Number(pt.amount).toLocaleString()}</b>
                     </span>
                   ))}
                 </div>
@@ -713,7 +725,7 @@ export default function MemberDashboardPage() {
               onClick={() => setActiveTab('transactions')}
               className="bg-amber-600 hover:bg-amber-700 text-white text-xs cursor-pointer shrink-0"
             >
-              View Dues
+              {isBn ? 'বকেয়া দেখুন' : 'View Dues'}
             </Button>
           </div>
         )}
@@ -723,54 +735,54 @@ export default function MemberDashboardPage() {
           <Card className="border-slate-200 shadow-2xs hover:border-emerald-200 transition-colors">
             <CardHeader className="p-4 pb-2">
               <CardTitle className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
-                <span>Total Paid</span>
+                <span>{isBn ? 'মোট পরিশোধিত জমা' : 'Total Paid'}</span>
                 <Wallet className="h-4 w-4 text-emerald-600" />
               </CardTitle>
             </CardHeader>
             <CardContent className="p-4 pt-0">
-              <div className="text-2xl font-bold text-slate-900">BDT {totalPaid.toLocaleString()}</div>
-              <p className="text-[11px] text-slate-500 mt-0.5">Completed contributions</p>
+              <div className="text-2xl font-bold text-slate-900">{isBn ? '৳ ' : 'BDT '}{totalPaid.toLocaleString()}</div>
+              <p className="text-[11px] text-slate-500 mt-0.5">{isBn ? 'সফল সঞ্চয় ও কিস্তি' : 'Completed contributions'}</p>
             </CardContent>
           </Card>
 
           <Card className="border-slate-200 shadow-2xs hover:border-emerald-200 transition-colors">
             <CardHeader className="p-4 pb-2">
               <CardTitle className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
-                <span>Receipts Issued</span>
+                <span>{isBn ? 'প্রদত্ত মানি রিসিট' : 'Receipts Issued'}</span>
                 <ReceiptIcon className="h-4 w-4 text-teal-600" />
               </CardTitle>
             </CardHeader>
             <CardContent className="p-4 pt-0">
               <div className="text-2xl font-bold text-slate-900">{receipts?.data.length ?? 0}</div>
-              <p className="text-[11px] text-slate-500 mt-0.5">Official payment slips</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">{isBn ? 'অফিসিয়াল অনুমোদিত রসিদ' : 'Official payment slips'}</p>
             </CardContent>
           </Card>
 
           <Card className="border-slate-200 shadow-2xs hover:border-emerald-200 transition-colors">
             <CardHeader className="p-4 pb-2">
               <CardTitle className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
-                <span>FDR Investments</span>
+                <span>{isBn ? 'এফডিআর / বিশেষ বিনিয়োগ' : 'FDR Investments'}</span>
                 <Landmark className="h-4 w-4 text-indigo-600" />
               </CardTitle>
             </CardHeader>
             <CardContent className="p-4 pt-0">
-              <div className="text-2xl font-bold text-slate-900">BDT {totalFdr.toLocaleString()}</div>
-              <p className="text-[11px] text-slate-500 mt-0.5">{fdrs?.data.length ?? 0} active certificate(s)</p>
+              <div className="text-2xl font-bold text-slate-900">{isBn ? '৳ ' : 'BDT '}{totalFdr.toLocaleString()}</div>
+              <p className="text-[11px] text-slate-500 mt-0.5">{fdrs?.data.length ?? 0} {isBn ? 'টি বিনিয়োগ সার্টিফিকেট' : 'active certificate(s)'}</p>
             </CardContent>
           </Card>
 
           <Card className="border-slate-200 shadow-2xs hover:border-emerald-200 transition-colors">
             <CardHeader className="p-4 pb-2">
               <CardTitle className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
-                <span>Notices &amp; Alerts</span>
+                <span>{isBn ? 'বিজ্ঞপ্তি ও নোটিশ' : 'Notices & Alerts'}</span>
                 <Bell className="h-4 w-4 text-amber-600" />
               </CardTitle>
             </CardHeader>
             <CardContent className="p-4 pt-0">
               <div className="text-2xl font-bold text-slate-900">
-                {unreadNotifs > 0 ? <span className="text-rose-600">{unreadNotifs} New</span> : '0 New'}
+                {unreadNotifs > 0 ? <span className="text-rose-600">{unreadNotifs} {isBn ? 'টি নতুন' : 'New'}</span> : isBn ? '০ নতুন' : '0 New'}
               </div>
-              <p className="text-[11px] text-slate-500 mt-0.5">{notifs?.data.length ?? 0} total updates</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">{notifs?.data.length ?? 0} {isBn ? 'টি মোট বার্তা' : 'total updates'}</p>
             </CardContent>
           </Card>
         </div>
@@ -786,10 +798,10 @@ export default function MemberDashboardPage() {
                   : 'text-slate-600 hover:bg-slate-100'
               }`}
             >
-              <CreditCard className="h-3.5 w-3.5" /> Transactions &amp; Dues ({trx?.data.length ?? 0})
+              <CreditCard className="h-3.5 w-3.5" /> {isBn ? 'জমা ও বকেয়া' : 'Transactions & Dues'} ({trx?.data.length ?? 0})
               {pendingTransactions.length > 0 && (
                 <span className="bg-amber-500 text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold ml-1">
-                  {pendingTransactions.length} Pending
+                  {pendingTransactions.length} {isBn ? 'বকেয়া' : 'Pending'}
                 </span>
               )}
             </button>
@@ -802,7 +814,7 @@ export default function MemberDashboardPage() {
                   : 'text-slate-600 hover:bg-slate-100'
               }`}
             >
-              <ReceiptIcon className="h-3.5 w-3.5" /> My Receipts ({receipts?.data.length ?? 0})
+              <ReceiptIcon className="h-3.5 w-3.5" /> {isBn ? 'মানি রিসিট ও ভাউচার' : 'My Receipts'} ({receipts?.data.length ?? 0})
             </button>
 
             <button
@@ -814,9 +826,9 @@ export default function MemberDashboardPage() {
               }`}
             >
               <Landmark className="h-3.5 w-3.5" />
-              <span>My FDRs</span>
+              <span>{isBn ? 'এফডিআর বিনিয়োগ' : 'My FDRs'}</span>
               <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300">
-                Soon
+                {isBn ? 'শীঘ্রই' : 'Soon'}
               </span>
             </button>
 
@@ -828,7 +840,7 @@ export default function MemberDashboardPage() {
                   : 'text-slate-600 hover:bg-slate-100'
               }`}
             >
-              <Bell className="h-3.5 w-3.5" /> Notices &amp; Alerts {unreadNotifs > 0 && <span className="bg-rose-500 text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold">{unreadNotifs}</span>}
+              <Bell className="h-3.5 w-3.5" /> {isBn ? 'বিজ্ঞপ্তি ও বার্তা' : 'Notices & Alerts'} {unreadNotifs > 0 && <span className="bg-rose-500 text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold">{unreadNotifs}</span>}
             </button>
 
             <button
@@ -839,7 +851,7 @@ export default function MemberDashboardPage() {
                   : 'text-slate-600 hover:bg-slate-100'
               }`}
             >
-              <UserIcon className="h-3.5 w-3.5" /> Profile &amp; Contact Info
+              <UserIcon className="h-3.5 w-3.5" /> {isBn ? 'সদস্য প্রোফাইল' : 'Profile & Contact Info'}
             </button>
           </div>
 
@@ -848,8 +860,8 @@ export default function MemberDashboardPage() {
             <Card className="border-slate-200 shadow-xs">
               <CardHeader className="p-4 border-b border-slate-100 flex flex-row items-center justify-between flex-wrap gap-2">
                 <div>
-                  <CardTitle className="text-base font-bold text-slate-900">Transaction History &amp; Assigned Dues</CardTitle>
-                  <p className="text-xs text-slate-500">View your monthly subscriptions, assigned payment dues, and upload proof of payment slips.</p>
+                  <CardTitle className="text-base font-bold text-slate-900">{isBn ? 'লেনদেন বিবরণী ও নির্ধারিত মাসিক চাঁদা' : 'Transaction History & Assigned Dues'}</CardTitle>
+                  <p className="text-xs text-slate-500">{isBn ? 'আপনার মাসিক চাঁদা, নির্ধারিত বকেয়া এবং পেমেন্ট রসিদ স্লিপ দেখুন।' : 'View your monthly subscriptions, assigned payment dues, and upload proof of payment slips.'}</p>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <div className="flex items-center bg-slate-100 p-1 rounded-lg">
@@ -862,7 +874,7 @@ export default function MemberDashboardPage() {
                       }`}
                     >
                       <ReceiptIcon className="h-3 w-3 text-emerald-700" />
-                      Demand Batches ({createdDemandGroups.length})
+                      {isBn ? 'চাঁদার বিবরণ' : 'Demand Batches'} ({createdDemandGroups.length})
                     </button>
                     <button
                       onClick={() => setTrxSubView('all')}
@@ -873,7 +885,7 @@ export default function MemberDashboardPage() {
                       }`}
                     >
                       <FileText className="h-3 w-3 text-emerald-700" />
-                      All Transactions ({trx?.data?.length || 0})
+                      {isBn ? 'সকল লেনদেন' : 'All Transactions'} ({trx?.data?.length || 0})
                     </button>
                   </div>
 
@@ -883,7 +895,7 @@ export default function MemberDashboardPage() {
                     onClick={handlePrintMemberStatement}
                     className="h-8 gap-1.5 border-emerald-300 text-emerald-800 hover:bg-emerald-50 text-xs font-bold cursor-pointer"
                   >
-                    <Printer className="h-3.5 w-3.5" /> Print Statement
+                    <Printer className="h-3.5 w-3.5" /> {isBn ? 'স্টেটমেন্ট প্রিন্ট' : 'Print Statement'}
                   </Button>
                 </div>
               </CardHeader>
@@ -893,9 +905,11 @@ export default function MemberDashboardPage() {
                   <div className="flex items-start gap-3">
                     <AlertCircle className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
                     <div className="space-y-1 text-xs text-red-900 flex-1">
-                      <p className="font-bold text-red-950">Payment Proof Slip Update</p>
+                      <p className="font-bold text-red-950">{isBn ? 'পেমেন্ট স্লিপ হালনাগাদ নোটিশ' : 'Payment Proof Slip Update'}</p>
                       <p className="text-[11px] text-red-800 leading-relaxed">
-                        One or more of your submitted payment slips were declined by Admin. You can click on the <b>Slip Rejected</b> badge to see the reason given by Admin. A new pending payment due has been automatically generated for you below to submit a valid slip.
+                        {isBn
+                          ? 'আপনার জমা দেওয়া এক বা একাধিক পেমেন্ট স্লিপ পর্যালোচনায় প্রত্যাখ্যাত হয়েছে। কারণ দেখতে প্রত্যাখ্যাত ব্যাজে ক্লিক করুন এবং সঠিক স্লিপ পুনরায় জমা দিন।'
+                          : 'One or more of your submitted payment slips were declined by Admin. You can click on the Slip Rejected badge to see the reason given by Admin. A new pending payment due has been automatically generated for you below to submit a valid slip.'}
                       </p>
                     </div>
                   </div>
@@ -943,16 +957,16 @@ export default function MemberDashboardPage() {
                             <TableRow className="hover:bg-slate-50/70 transition-colors">
                               <TableCell className="px-3 py-3.5">
                                 <div className="flex flex-col">
-                                  <span className="font-bold text-slate-900 text-sm truncate" title={group.title}>
-                                    {group.title}
+                                  <span className="font-bold text-slate-900 text-sm truncate" title={formatDemandTitleI18n(group.title, group.month, group.category, isBn)}>
+                                    {formatDemandTitleI18n(group.title, group.month, group.category, isBn)}
                                   </span>
                                   <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                                     <Badge variant="outline" className="capitalize text-[10px] font-semibold">
-                                      {group.category.replace(/_/g, ' ')}
+                                      {formatPaymentCategoryI18n(group.category, isBn)}
                                     </Badge>
                                     {group.month && (
                                       <span className="text-[11px] text-slate-500 font-medium">
-                                        Month: {group.month}
+                                        {isBn ? 'মাস:' : 'Month:'} {formatMonthI18n(group.month, isBn)}
                                       </span>
                                     )}
                                     {(group.transaction_no || group.id) && (
@@ -1287,16 +1301,16 @@ export default function MemberDashboardPage() {
                         <div key={group.key} className="bg-white rounded-xl border border-slate-200 p-3.5 shadow-2xs space-y-3">
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
-                              <h4 className="font-bold text-slate-900 text-xs leading-snug truncate" title={group.title}>
-                                {group.title}
+                              <h4 className="font-bold text-slate-900 text-xs leading-snug truncate" title={formatDemandTitleI18n(group.title, group.month, group.category, isBn)}>
+                                {formatDemandTitleI18n(group.title, group.month, group.category, isBn)}
                               </h4>
                               <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                                 <Badge variant="outline" className="capitalize text-[9px] font-semibold">
-                                  {group.category.replace(/_/g, ' ')}
+                                  {formatPaymentCategoryI18n(group.category, isBn)}
                                 </Badge>
                                 {group.month && (
                                   <span className="text-[10px] text-slate-500 font-medium">
-                                    {group.month}
+                                    {isBn ? 'মাস:' : 'Month:'} {formatMonthI18n(group.month, isBn)}
                                   </span>
                                 )}
                                 {(group.transaction_no || group.id) && (
@@ -1310,23 +1324,23 @@ export default function MemberDashboardPage() {
                             <div className="shrink-0">
                               {group.status === 'paid' ? (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300">
-                                  <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Paid
+                                  <CheckCircle2 className="h-3 w-3 text-emerald-600" /> {isBn ? 'পরিশোধিত' : 'Paid'}
                                 </span>
                               ) : group.status === 'partial' ? (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-800 border border-purple-300">
-                                  <Wallet className="h-3 w-3 text-purple-600" /> Partial
+                                  <Wallet className="h-3 w-3 text-purple-600" /> {isBn ? 'আংশিক' : 'Partial'}
                                 </span>
                               ) : group.status === 'received_slip' ? (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-300">
-                                  <FileCheck className="h-3 w-3 text-blue-600" /> Slip Sent
+                                  <FileCheck className="h-3 w-3 text-blue-600" /> {isBn ? 'স্লিপ জমা' : 'Slip Sent'}
                                 </span>
                               ) : group.status === 'rejected' ? (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-50 text-red-800 border border-red-300">
-                                  <XCircle className="h-3 w-3 text-red-600" /> Rejected
+                                  <XCircle className="h-3 w-3 text-red-600" /> {isBn ? 'প্রত্যাখ্যাত' : 'Rejected'}
                                 </span>
                               ) : (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-900 border border-amber-300">
-                                  <Clock className="h-3 w-3 text-amber-600" /> Due
+                                  <Clock className="h-3 w-3 text-amber-600" /> {isBn ? 'বকেয়া' : 'Due'}
                                 </span>
                               )}
                             </div>
@@ -1530,31 +1544,27 @@ export default function MemberDashboardPage() {
                           </TableCell>
                           <TableCell className="px-3 py-3.5">
                             <Badge variant="outline" className="capitalize text-[11px] font-semibold">
-                              {t.payment_category === 'monthly_payment'
-                                ? 'Monthly Subscription'
-                                : t.payment_category === 'one_time'
-                                ? 'One-Time Payment'
-                                : t.type}
+                              {formatPaymentCategoryI18n(t.payment_category || t.type, isBn)}
                             </Badge>
                           </TableCell>
                           <TableCell className="px-3 py-3.5">
                             <div className="flex flex-col">
                               {t.month && (
                                 <span className="font-bold text-slate-800 text-xs flex items-center gap-1">
-                                  <CalendarIcon className="h-3 w-3 text-emerald-700 inline shrink-0" /> {t.month}
+                                  <CalendarIcon className="h-3 w-3 text-emerald-700 inline shrink-0" /> {formatMonthI18n(t.month, isBn)}
                                 </span>
                               )}
                               <span className="text-xs text-slate-500 truncate" title={t.description}>{t.description || '-'}</span>
                             </div>
                           </TableCell>
-                          <TableCell className="px-3 py-3.5 font-bold text-slate-900 text-sm">BDT {Number(t.amount).toLocaleString()}</TableCell>
+                          <TableCell className="px-3 py-3.5 font-bold text-slate-900 text-sm">{isBn ? '৳ ' : 'BDT '}{Number(t.amount).toLocaleString()}</TableCell>
                           <TableCell className="px-3 py-3.5">
                             {isPartialPaid ? (
                               <div className="flex flex-col gap-0.5 items-start">
                                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-purple-50 text-purple-800 border border-purple-300 shadow-2xs">
-                                  <Wallet className="h-3 w-3 text-purple-600 shrink-0" /> Partially Paid
+                                  <Wallet className="h-3 w-3 text-purple-600 shrink-0" /> {isBn ? 'আংশিক পরিশোধিত' : 'Partially Paid'}
                                 </span>
-                                <span className="text-[10px] text-purple-700 font-semibold">Partial Payment</span>
+                                <span className="text-[10px] text-purple-700 font-semibold">{isBn ? 'আংশিক জমা' : 'Partial Payment'}</span>
                               </div>
                             ) : isPartialPending ? (
                               <div className="flex flex-col gap-0.5 items-start">
@@ -1722,8 +1732,8 @@ export default function MemberDashboardPage() {
             <Card className="border-slate-200 shadow-xs">
               <CardHeader className="p-4 border-b border-slate-100 flex flex-row items-center justify-between">
                 <div>
-                  <CardTitle className="text-base font-bold text-slate-900">Payment Receipts</CardTitle>
-                  <p className="text-xs text-slate-500">Official proof of payment slips issued by the society.</p>
+                  <CardTitle className="text-base font-bold text-slate-900">{isBn ? 'পরিশোধিত মানি রিসিট ও ভাউচার' : 'Payment Receipts'}</CardTitle>
+                  <p className="text-xs text-slate-500">{isBn ? 'সোসাইটি কর্তৃক ইস্যুকৃত সকল অফিসিয়াল মানি রিসিট।' : 'Official proof of payment slips issued by the society.'}</p>
                 </div>
               </CardHeader>
               <CardContent className="p-0">
@@ -1732,19 +1742,19 @@ export default function MemberDashboardPage() {
                   <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Receipt No</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Payment Method</TableHead>
-                      <TableHead>Amount</TableHead>
-                      <TableHead className="text-right">Action</TableHead>
+                      <TableHead>{t.dashboard.colReceiptNo}</TableHead>
+                      <TableHead>{t.dashboard.colDate}</TableHead>
+                      <TableHead>{isBn ? 'পেমেন্ট মাধ্যম' : 'Payment Method'}</TableHead>
+                      <TableHead>{t.dashboard.colAmount}</TableHead>
+                      <TableHead className="text-right">{t.dashboard.colActions}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {loadingReceipts && (
-                      <TableRow><TableCell colSpan={5} className="text-center py-8 text-slate-500">Loading receipts...</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={5} className="text-center py-8 text-slate-500">{isBn ? 'রসিদ লোড হচ্ছে...' : 'Loading receipts...'}</TableCell></TableRow>
                     )}
                     {receipts?.data.length === 0 && !loadingReceipts && (
-                      <TableRow><TableCell colSpan={5} className="text-center py-8 text-slate-500">No receipts issued yet.</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={5} className="text-center py-8 text-slate-500">{t.dashboard.noReceipts}</TableCell></TableRow>
                     )}
                     {receipts?.data.map((r) => {
                       const isPartial = r.transaction?.description && (/partial payment/i.test(r.transaction.description) || /remaining due/i.test(r.transaction.description));
@@ -1756,7 +1766,7 @@ export default function MemberDashboardPage() {
                               <span>{r.receipt_no}</span>
                               {isPartial && (
                                 <span className="text-[10px] text-purple-700 font-semibold bg-purple-50 px-1.5 py-0.2 rounded border border-purple-200 mt-0.5">
-                                  Partial Installment
+                                  {isBn ? 'আংশিক কিস্তি' : 'Partial Installment'}
                                 </span>
                               )}
                             </div>
@@ -1767,7 +1777,7 @@ export default function MemberDashboardPage() {
                               {r.payment_method?.replace(/_/g, ' ')}
                             </Badge>
                           </TableCell>
-                          <TableCell className="font-bold text-slate-900 text-sm">BDT {Number(r.amount).toLocaleString()}</TableCell>
+                          <TableCell className="font-bold text-slate-900 text-sm">{isBn ? '৳ ' : 'BDT '}{Number(r.amount).toLocaleString()}</TableCell>
                           <TableCell className="text-right">
                             <Button
                               variant="outline"
@@ -1775,7 +1785,7 @@ export default function MemberDashboardPage() {
                               onClick={() => handlePrint(r)}
                               className="h-8 gap-1.5 text-xs cursor-pointer border-slate-200 hover:bg-emerald-50 hover:text-emerald-800"
                             >
-                              <Printer className="h-3.5 w-3.5" /> Print Receipt
+                              <Printer className="h-3.5 w-3.5" /> {isBn ? 'রসিদ প্রিন্ট' : 'Print Receipt'}
                             </Button>
                           </TableCell>
                         </TableRow>

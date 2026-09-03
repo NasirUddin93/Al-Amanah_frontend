@@ -5,6 +5,8 @@ import { setupListeners } from '@reduxjs/toolkit/query';
 import { makeStore, type AppStore } from '@/store';
 import { rehydrate } from '@/store/authSlice';
 
+import { LanguageProvider } from '@/components/language-context';
+
 export function Providers({ children }: { children: React.ReactNode }) {
   const storeRef = useRef<AppStore | null>(null);
   if (!storeRef.current) {
@@ -19,5 +21,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  return <Provider store={storeRef.current}>{children}</Provider>;
+  return (
+    <Provider store={storeRef.current}>
+      <LanguageProvider>{children}</LanguageProvider>
+    </Provider>
+  );
 }

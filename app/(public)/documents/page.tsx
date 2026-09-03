@@ -1,16 +1,35 @@
 'use client';
 import React from 'react';
 import Reveal from '@/components/public/reveal';
-import SectionHead from '@/components/public/section-head';
+import { useLanguage } from '@/components/language-context';
+import { TRANSLATIONS } from '@/lib/translations';
 
 export default function DocumentsPage() {
+  const { lang, isBn } = useLanguage();
+  const t = TRANSLATIONS[lang];
+
+  const sampleMonths = isBn
+    ? ['জুলাই ২০২৬', 'আগস্ট ২০২৬', 'সেপ্টেম্বর ২০২৬', 'অক্টোবর ২০২৬']
+    : ['July 2026', 'August 2026', 'September 2026', 'October 2026'];
+
+  const sampleDates = isBn
+    ? ['০৫/০৭/২৬', '০৪/০৮/২৬', '০৬/০৯/২৬', '০৫/১০/২৬']
+    : ['05/07/26', '04/08/26', '06/09/26', '05/10/26'];
+
+  const sampleDeposit = isBn ? '৫০০ /-' : '500 /-';
+  const sampleSignature = isBn ? 'স্বাক্ষরিত ✓' : 'Signed ✓';
+
   return (
     <>
       <div className="page-hero">
         <div className="container">
-          <span className="sec-tag">Document Templates</span>
-          <h1 className="sec-title">Official Forms & <span className="g">Passbook Layout</span></h1>
-          <button className="btn btn-green no-print" style={{ marginTop: 22 }} onClick={() => window.print()}>🖨️ Print / Save PDF</button>
+          <span className="sec-tag">{t.documents.heroTag}</span>
+          <h1 className="sec-title">
+            {t.documents.heroTitle} <span className="g">{t.documents.heroTitleAccent}</span>
+          </h1>
+          <button className="btn btn-green no-print" style={{ marginTop: 22 }} onClick={() => window.print()}>
+            {t.documents.btnPrint}
+          </button>
         </div>
       </div>
 
@@ -21,29 +40,70 @@ export default function DocumentsPage() {
           <Reveal>
             <div className="doc-sheet">
               <div className="doc-head">
-                <h3>AL-AMANAH SAVINGS AND WELFARE SOCIETY</h3>
-                <p>Munshihati (2nd Floor, Holy Touch Ideal School), Kamrangirchar, Dhaka-1211 • Established: July 01, 2026</p>
-                <p style={{ fontWeight: 800, marginTop: 8, color: 'var(--green-700)' }}>MEMBERSHIP FORM (Sample Case File)</p>
+                <h3>{isBn ? 'আল-আমানাহ সঞ্চয় ও কল্যাণ সোসাইটি' : 'AL-AMANAH SAVINGS AND WELFARE SOCIETY'}</h3>
+                <p>{t.nav.address} • {t.nav.tagline}</p>
+                <p style={{ fontWeight: 800, marginTop: 8, color: 'var(--green-700)' }}>
+                  {t.documents.formTitle}
+                </p>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px', gap: 24 }}>
                 <div className="doc-grid" style={{ gridTemplateColumns: '1fr' }}>
-                  <div><b>01. Applicant:</b> মোঃ সাজিদ ইশতিয়াক — Md. Sazid Istiaq</div>
-                  <div><b>02. Father:</b> Md. Anwar Uddin (মোঃ আনোয়ার উদ্দীন)</div>
-                  <div><b>03. Mother:</b> Rubina Akter (রুবিনা আক্তার)</div>
-                  <div><b>05. Present Address:</b> 10/10/1 Sarat Gupta Road, Narinda, Dhaka Sadar, Gendaria, Dhaka</div>
-                  <div><b>06. Permanent Address:</b> Bachchu Miah, Nayerpur, Mahajanerhat, Zorarganj, Chittagong</div>
-                  <div><b>07. Contact:</b> +8801877310997 • +8801521584449 (WhatsApp)</div>
-                  <div><b>08. Nominee:</b> Md. Mehedi Istiaq (ভাই) — NID: 7567526883</div>
-                  <div><b>09. Profession:</b> Service Holder (চাকুরীজীবী) — Akar IT, Uttara, Dhaka</div>
-                  <div><b>11. NID:</b> 6465219175 • <b>12. DOB:</b> 18/07/2001 • <b>13. Blood:</b> B+</div>
-                  <div><b>14. Nationality:</b> Bangladeshi • <b>15. Religion:</b> Islam</div>
+                  <div>
+                    <b>{t.documents.formApplicant}</b> {isBn ? 'মোঃ সাজিদ ইশতিয়াক' : 'Md. Sazid Istiaq'}
+                  </div>
+                  <div>
+                    <b>{t.documents.formFather}</b> {isBn ? 'মোঃ আনোয়ার উদ্দীন' : 'Md. Anwar Uddin'}
+                  </div>
+                  <div>
+                    <b>{t.documents.formMother}</b> {isBn ? 'রুবিনা আক্তার' : 'Rubina Akter'}
+                  </div>
+                  <div>
+                    <b>{t.documents.formPresent}</b>{' '}
+                    {isBn ? '১০/১০/১ শরৎ গুপ্ত রোড, নারিন্দা, ঢাকা সদর, গেন্ডারিয়া, ঢাকা' : '10/10/1 Sarat Gupta Road, Narinda, Dhaka Sadar, Gendaria, Dhaka'}
+                  </div>
+                  <div>
+                    <b>{t.documents.formPermanent}</b>{' '}
+                    {isBn ? 'বাচ্চু মিয়া, নায়েরপুর, মহাজনরহাট, জোরারগঞ্জ, চট্টগ্রাম' : 'Bachchu Miah, Nayerpur, Mahajanerhat, Zorarganj, Chittagong'}
+                  </div>
+                  <div>
+                    <b>{t.documents.formContact}</b>{' '}
+                    {isBn ? '+৮৮০১৮৭৭৩১০৯৯৭ • +৮৮০১৫২১৫৮৪৪৪৯ (হোয়াটসঅ্যাপ)' : '+8801877310997 • +8801521584449 (WhatsApp)'}
+                  </div>
+                  <div>
+                    <b>{t.documents.formNominee}</b>{' '}
+                    {isBn ? 'মোঃ মেহেদী ইশতিয়াক (ভাই) — জাতীয় পরিচয়পত্র: ৭৫৬৭৫২৬৮৮৩' : 'Md. Mehedi Istiaq (Brother) — NID: 7567526883'}
+                  </div>
+                  <div>
+                    <b>{t.documents.formProfession}</b>{' '}
+                    {isBn ? 'চাকুরীজীবী — আকার আইটি, উত্তরা, ঢাকা' : 'Service Holder — Akar IT, Uttara, Dhaka'}
+                  </div>
+                  <div>
+                    {isBn ? (
+                      <>
+                        <b>{t.documents.formNid}</b> ৬৪৬৫২১৯১৭৫ • <b>১২. জন্ম তারিখ:</b> ১৮/০৭/২০০১ • <b>১৩. রক্তের গ্রুপ:</b> বি+ (B+)
+                      </>
+                    ) : (
+                      <>
+                        <b>{t.documents.formNid}</b> 6465219175 • <b>{t.documents.formDob}</b> 18/07/2001 • <b>{t.documents.formBlood}</b> B+
+                      </>
+                    )}
+                  </div>
+                  <div>
+                    <b>{t.documents.formNationality}</b> {isBn ? 'বাংলাদেশী' : 'Bangladeshi'} • <b>{t.documents.formReligion}</b> {isBn ? 'ইসলাম' : 'Islam'}
+                  </div>
                 </div>
-                <div className="photo-box">AFFIX PASSPORT PHOTO HERE</div>
+                <div className="photo-box">
+                  {isBn ? 'পাসপোর্ট সাইজের ছবি এখানে সংযুক্ত করুন' : 'AFFIX PASSPORT PHOTO HERE'}
+                </div>
               </div>
               <p style={{ fontSize: 12.5, marginTop: 18, lineHeight: 1.7, color: 'var(--muted)' }}>
-                <b style={{ color: 'var(--green-800)' }}>16. Solemn Pledge:</b> “I have read and fully understood the constitution and principles of Al-Amanah Savings and Welfare Society and solemnly pledge to faithfully abide by all its rules and regulations.”
+                <b style={{ color: 'var(--green-800)' }}>{t.documents.formPledgeLabel}</b> {t.documents.formPledgeText}
               </p>
-              <div className="sig-row"><span>Treasurer</span><span>General Secretary</span><span>President</span></div>
+              <div className="sig-row">
+                <span>{t.documents.sigTreasurer}</span>
+                <span>{t.documents.sigGS}</span>
+                <span>{t.documents.sigPresident}</span>
+              </div>
             </div>
           </Reveal>
 
@@ -52,22 +112,40 @@ export default function DocumentsPage() {
             <div className="doc-sheet">
               <div className="doc-head">
                 <div className="bismillah">بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ</div>
-                <h3>Monthly Subscription Ledger / Passbook</h3>
-                <p>AL-AMANAH SAVINGS AND WELFARE SOCIETY • Established: July 01, 2026</p>
+                <h3>{t.documents.passbookTitle}</h3>
+                <p>{isBn ? 'আল-আমানাহ সঞ্চয় ও কল্যাণ সোসাইটি • প্রতিষ্ঠা: ১ জুলাই, ২০২৬' : 'AL-AMANAH SAVINGS AND WELFARE SOCIETY • Established: July 01, 2026'}</p>
               </div>
               {[0, 1].map((k) => (
                 <table className="doc-table" key={k} style={{ marginBottom: 26 }}>
                   <thead>
-                    <tr><th>Month</th><th>Date</th><th>Monthly Deposit (BDT)</th><th>Collector’s Signature</th></tr>
+                    <tr>
+                      <th>{t.documents.colMonth}</th>
+                      <th>{t.documents.colDate}</th>
+                      <th>{t.documents.colDeposit}</th>
+                      <th>{t.documents.colCollectorSig}</th>
+                    </tr>
                   </thead>
                   <tbody>
-                    {[...Array(4)].map((_, i) => (
-                      <tr key={i}><td style={{ height: 34 }}>&nbsp;</td><td></td><td></td><td></td></tr>
+                    {sampleMonths.map((m, i) => (
+                      <tr key={i}>
+                        <td style={{ height: 34 }}>{m}</td>
+                        <td>{sampleDates[i]}</td>
+                        <td>{sampleDeposit}</td>
+                        <td>{sampleSignature}</td>
+                      </tr>
                     ))}
-                    <tr><td>Special Fund:</td><td></td><td colSpan={2}></td></tr>
                     <tr>
-                      <td colSpan={2}><b>Total Deposited Cumulative Amount: BDT …………</b></td>
-                      <td colSpan={2}><b>Treasurer’s Signature & Seal:</b></td>
+                      <td>{t.documents.specialFund}</td>
+                      <td>{isBn ? '০' : '0'}</td>
+                      <td colSpan={2}>{isBn ? 'জরুরী কল্যাণ জমা: প্রযোজ্য নয়' : 'Emergency Fund: N/A'}</td>
+                    </tr>
+                    <tr>
+                      <td colSpan={2}>
+                        <b>{isBn ? 'সর্বমোট জমাকৃত সঞ্চয়ের পরিমাণ: ২,০০০/- টাকা' : 'Total Deposited Cumulative Amount: BDT 2,000/-'}</b>
+                      </td>
+                      <td colSpan={2}>
+                        <b>{t.documents.treasurerSigSeal}</b> {isBn ? 'যাচাইকৃত ও অনুমোদিত' : 'Verified & Approved'}
+                      </td>
                     </tr>
                   </tbody>
                 </table>

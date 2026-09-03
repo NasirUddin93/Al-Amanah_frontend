@@ -17,6 +17,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { ReceiptSlipThumbnail, MagnifiableModalImage } from '@/components/receipt-magnifier';
 import { ReceiptPrintArea } from '@/components/receipt-print';
 import type { Transaction, Receipt } from '@/types';
+import { useLanguage } from '@/components/language-context';
+import { MEMBER_TRANSLATIONS } from '@/lib/member-translations';
 import {
   Calendar as CalendarIcon,
   DollarSign,
@@ -44,7 +46,14 @@ import {
   Users,
   ListChecks,
 } from 'lucide-react';
-import { formatDateTime, formatDate } from '@/lib/utils';
+import {
+  formatDateTime,
+  formatDate,
+  formatMonthI18n,
+  formatPaymentCategoryI18n,
+  formatDemandTitleI18n,
+  toBengaliDigits,
+} from '@/lib/utils';
 
 function extractReferenceId(trx?: any, receipt?: any): string {
   // If no slip is uploaded for this row, do not show any reference ID
@@ -80,6 +89,8 @@ function extractReferenceId(trx?: any, receipt?: any): string {
 }
 
 export default function MemberTransactionsPage() {
+  const { lang, isBn } = useLanguage();
+  const t = MEMBER_TRANSLATIONS[lang];
   const user = useAppSelector((s) => s.auth.user);
   const { data: trx, isLoading: loadingTrx } = useGetTransactionsQuery({ per_page: 500 }, { pollingInterval: 3000 });
   const { data: receiptsData } = useGetReceiptsQuery(undefined, { pollingInterval: 3000 });
@@ -960,16 +971,16 @@ export default function MemberTransactionsPage() {
       <div className={printReceipt ? 'space-y-5 w-full max-w-full overflow-x-hidden print:hidden' : 'space-y-5 w-full max-w-full overflow-x-hidden'}>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">My Transactions &amp; Dues</h1>
+          <h1 className="text-2xl font-bold text-slate-900">{t.transactions.pageTitle}</h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            View all assigned society subscription dues, record history, and upload payment proof slips.
+            {t.transactions.pageSub}
           </p>
         </div>
         {pendingTransactions.length > 0 && (
           <div className="flex items-center gap-2 flex-wrap">
             <div className="bg-amber-50 border border-amber-300 px-3.5 py-1.5 rounded-xl text-amber-900 font-bold text-xs flex items-center gap-1.5 shadow-2xs">
               <Clock className="h-4 w-4 text-amber-600" />
-              <span>Outstanding Dues: BDT {pendingAmount.toLocaleString()} ({pendingTransactions.length} Pending)</span>
+              <span>{isBn ? 'মোট বকেয়া চাঁদা:' : 'Outstanding Dues:'} {isBn ? '৳ ' : 'BDT '}{pendingAmount.toLocaleString()} ({pendingTransactions.length} {isBn ? 'টি বাকি' : 'Pending'})</span>
             </div>
             {pendingTransactions.length >= 2 && (
               <Button
@@ -986,7 +997,7 @@ export default function MemberTransactionsPage() {
                 }`}
               >
                 <ListChecks className="h-3.5 w-3.5" />
-                {batchMode ? 'Cancel Batch Select' : 'Pay Multiple Dues Together'}
+                {batchMode ? (isBn ? 'নির্বাচন বাতিল' : 'Cancel Batch Select') : (isBn ? 'একাধিক চাঁদা একসাথে পরিশোধ' : 'Pay Multiple Dues Together')}
               </Button>
             )}
           </div>
@@ -1008,7 +1019,7 @@ export default function MemberTransactionsPage() {
                 }`}
               >
                 <ReceiptIcon className="h-3.5 w-3.5 text-emerald-700" />
-                Demand Batches Created ({totalDemandBatchesCount})
+                {isBn ? 'চাঁদার বিবরণ' : 'Demand Batches Created'} ({totalDemandBatchesCount})
               </button>
               <button
                 onClick={() => setActiveTab('all')}
@@ -1019,7 +1030,7 @@ export default function MemberTransactionsPage() {
                 }`}
               >
                 <FileText className="h-3.5 w-3.5 text-emerald-700" />
-                All Transactions History ({trx?.data?.length || 0})
+                {isBn ? 'সকল লেনদেন' : 'All Transactions History'} ({trx?.data?.length || 0})
               </button>
             </div>
 
@@ -1179,30 +1190,30 @@ export default function MemberTransactionsPage() {
                           )}
                           {m.isPrimary ? (
                             <span className="text-[10px] font-bold bg-purple-50 text-purple-900 border border-purple-300 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                              Primary Account
+                              {isBn ? 'মূল অ্যাকাউন্ট' : 'Primary Account'}
                             </span>
                           ) : (
                             <span className="text-[10px] font-bold bg-blue-50 text-blue-900 border border-blue-300 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                              Linked Account
+                              {isBn ? 'সংযুক্ত অ্যাকাউন্ট' : 'Linked Account'}
                             </span>
                           )}
                         </div>
                         <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap">
-                          <span>{m.subscriptions.length} {m.subscriptions.length === 1 ? 'Subscription Demand' : 'Subscription Demands'}</span>
+                          <span>{m.subscriptions.length} {isBn ? 'টি নির্ধারিত চাঁদা' : (m.subscriptions.length === 1 ? 'Subscription Demand' : 'Subscription Demands')}</span>
                           {m.status === 'paid' && (
-                            <span className="text-emerald-700 font-bold flex items-center gap-1"><CheckCircle2 className="h-3 w-3" /> All Cleared</span>
+                            <span className="text-emerald-700 font-bold flex items-center gap-1"><CheckCircle2 className="h-3 w-3" /> {isBn ? 'অনুমোদিত' : 'All Cleared'}</span>
                           )}
                           {m.status === 'partial' && (
-                            <span className="text-purple-700 font-bold flex items-center gap-1"><Wallet className="h-3 w-3" /> Partial Paid</span>
+                            <span className="text-purple-700 font-bold flex items-center gap-1"><Wallet className="h-3 w-3" /> {isBn ? 'আংশিক পরিশোধিত' : 'Partial Paid'}</span>
                           )}
                           {m.status === 'received_slip' && (
-                            <span className="text-blue-700 font-bold flex items-center gap-1"><FileCheck className="h-3 w-3" /> Receipt Sent</span>
+                            <span className="text-blue-700 font-bold flex items-center gap-1"><FileCheck className="h-3 w-3" /> {isBn ? 'স্লিপ জমা' : 'Receipt Sent'}</span>
                           )}
                           {m.status === 'rejected' && (
-                            <span className="text-red-700 font-bold flex items-center gap-1"><XCircle className="h-3 w-3" /> Slip Rejected</span>
+                            <span className="text-red-700 font-bold flex items-center gap-1"><XCircle className="h-3 w-3" /> {isBn ? 'প্রত্যাখ্যাত' : 'Slip Rejected'}</span>
                           )}
                           {m.status === 'pending' && (
-                            <span className="text-amber-700 font-bold flex items-center gap-1"><Clock className="h-3 w-3" /> Dues Pending</span>
+                            <span className="text-amber-700 font-bold flex items-center gap-1"><Clock className="h-3 w-3" /> {isBn ? 'বকেয়া' : 'Dues Pending'}</span>
                           )}
                         </p>
                       </div>
@@ -1212,12 +1223,12 @@ export default function MemberTransactionsPage() {
                     <div className="flex items-center gap-3 flex-wrap justify-between md:justify-end">
                       <div className="flex items-center gap-2">
                         <div className="bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-lg text-right">
-                          <span className="text-[10px] text-emerald-700 block font-semibold">Total Paid</span>
-                          <span className="text-xs font-bold text-emerald-900">BDT {m.totalPaidAmount.toLocaleString()}</span>
+                          <span className="text-[10px] text-emerald-700 block font-semibold">{isBn ? 'মোট পরিশোধিত' : 'Total Paid'}</span>
+                          <span className="text-xs font-bold text-emerald-900">{isBn ? '৳ ' : 'BDT '}{m.totalPaidAmount.toLocaleString()}</span>
                         </div>
                         <div className="bg-amber-50 border border-amber-200 px-3 py-1 rounded-lg text-right">
-                          <span className="text-[10px] text-amber-700 block font-semibold">Total Due</span>
-                          <span className="text-xs font-bold text-amber-900">BDT {m.totalDueAmount.toLocaleString()}</span>
+                          <span className="text-[10px] text-amber-700 block font-semibold">{isBn ? 'মোট বকেয়া' : 'Total Due'}</span>
+                          <span className="text-xs font-bold text-amber-900">{isBn ? '৳ ' : 'BDT '}{m.totalDueAmount.toLocaleString()}</span>
                         </div>
                       </div>
 
@@ -1230,7 +1241,7 @@ export default function MemberTransactionsPage() {
                         }}
                         className="h-8 text-xs cursor-pointer border-slate-300 hover:bg-slate-100 shrink-0"
                       >
-                        {isMemberExpanded ? 'Hide Subscriptions' : `View Subscriptions (${m.subscriptions.length})`}
+                        {isMemberExpanded ? (isBn ? 'চাঁদা লুকান' : 'Hide Subscriptions') : (isBn ? `চাঁদা দেখুন (${m.subscriptions.length})` : `View Subscriptions (${m.subscriptions.length})`)}
                         {isMemberExpanded ? <ChevronUp className="h-4 w-4 ml-1" /> : <ChevronDown className="h-4 w-4 ml-1" />}
                       </Button>
                     </div>
@@ -1284,16 +1295,16 @@ export default function MemberTransactionsPage() {
                                             </label>
                                           )}
                                           <div className="flex flex-col">
-                                            <span className="font-bold text-slate-900 text-sm truncate" title={sub.title}>
-                                              {sub.title}
+                                            <span className="font-bold text-slate-900 text-sm truncate" title={formatDemandTitleI18n(sub.title, sub.month, sub.category, isBn)}>
+                                              {formatDemandTitleI18n(sub.title, sub.month, sub.category, isBn)}
                                             </span>
                                             <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                                               <Badge variant="outline" className="capitalize text-[10px] font-semibold">
-                                                {sub.category.replace(/_/g, ' ')}
+                                                {formatPaymentCategoryI18n(sub.category, isBn)}
                                               </Badge>
                                               {sub.month && (
                                                 <span className="text-[11px] text-slate-500 font-medium">
-                                                  Month: {sub.month}
+                                                  {isBn ? 'মাস:' : 'Month:'} {formatMonthI18n(sub.month, isBn)}
                                                 </span>
                                               )}
                                               {(sub.transaction_no || sub.id) && (
@@ -1314,16 +1325,16 @@ export default function MemberTransactionsPage() {
                                         {sub.isPartial && sub.status !== 'paid' ? (
                                           <div className="flex flex-col">
                                             <span className="font-bold text-purple-950 text-sm">
-                                              BDT {Number(sub.totalPaidAmount).toLocaleString()}{' '}
-                                              <span className="text-[10px] text-emerald-700 font-semibold">(Paid)</span>
+                                              {isBn ? '৳ ' : 'BDT '}{Number(sub.totalPaidAmount).toLocaleString()}{' '}
+                                              <span className="text-[10px] text-emerald-700 font-semibold">({isBn ? 'জমা' : 'Paid'})</span>
                                             </span>
                                             <span className="text-[11px] text-amber-800 font-medium">
-                                              Due: BDT {Number(sub.totalDemandAmount).toLocaleString()}
+                                              {isBn ? 'বকেয়া:' : 'Due:'} {isBn ? '৳ ' : 'BDT '}{Number(sub.totalDemandAmount).toLocaleString()}
                                             </span>
                                           </div>
                                         ) : (
                                           <span className="font-bold text-slate-900 text-sm">
-                                            BDT {Number(sub.totalDemandAmount || sub.totalPaidAmount).toLocaleString()}
+                                            {isBn ? '৳ ' : 'BDT '}{Number(sub.totalDemandAmount || sub.totalPaidAmount).toLocaleString()}
                                           </span>
                                         )}
                                       </TableCell>
@@ -1332,27 +1343,27 @@ export default function MemberTransactionsPage() {
                                         {sub.status === 'paid' ? (
                                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 shadow-2xs">
                                             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                                            Paid
+                                            {isBn ? 'পরিশোধিত' : 'Paid'}
                                           </span>
                                         ) : sub.status === 'partial' ? (
                                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-purple-50 text-purple-800 border border-purple-300 shadow-2xs">
                                             <Wallet className="h-3.5 w-3.5 text-purple-600" />
-                                            Partially Paid
+                                            {isBn ? 'আংশিক পরিশোধিত' : 'Partially Paid'}
                                           </span>
                                         ) : sub.status === 'received_slip' ? (
                                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-800 border border-blue-300 shadow-2xs">
                                             <FileCheck className="h-3.5 w-3.5 text-blue-600" />
-                                            Receipt Sent
+                                            {isBn ? 'স্লিপ জমা' : 'Receipt Sent'}
                                           </span>
                                         ) : sub.status === 'rejected' ? (
                                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-red-50 text-red-800 border border-red-300 shadow-2xs">
                                             <XCircle className="h-3.5 w-3.5 text-red-600" />
-                                            Slip Rejected
+                                            {isBn ? 'প্রত্যাখ্যাত' : 'Slip Rejected'}
                                           </span>
                                         ) : (
                                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
                                             <Clock className="h-3.5 w-3.5 text-amber-600" />
-                                            Due Pending
+                                            {isBn ? 'বকেয়া' : 'Due Pending'}
                                           </span>
                                         )}
                                       </TableCell>
@@ -1619,16 +1630,16 @@ export default function MemberTransactionsPage() {
                                       </label>
                                     )}
                                     <div className="min-w-0">
-                                      <h4 className="font-bold text-slate-900 text-xs leading-snug truncate" title={sub.title}>
-                                        {sub.title}
+                                      <h4 className="font-bold text-slate-900 text-xs leading-snug truncate" title={formatDemandTitleI18n(sub.title, sub.month, sub.category, isBn)}>
+                                        {formatDemandTitleI18n(sub.title, sub.month, sub.category, isBn)}
                                       </h4>
                                       <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                                         <Badge variant="outline" className="capitalize text-[9px] font-semibold">
-                                          {sub.category.replace(/_/g, ' ')}
+                                          {formatPaymentCategoryI18n(sub.category, isBn)}
                                         </Badge>
                                         {sub.month && (
                                           <span className="text-[10px] text-slate-500 font-medium">
-                                            {sub.month}
+                                            {isBn ? 'মাস:' : 'Month:'} {formatMonthI18n(sub.month, isBn)}
                                           </span>
                                         )}
                                         {(sub.transaction_no || sub.id) && (
@@ -1643,23 +1654,23 @@ export default function MemberTransactionsPage() {
                                   <div className="shrink-0">
                                     {sub.status === 'paid' ? (
                                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300">
-                                        <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Paid
+                                        <CheckCircle2 className="h-3 w-3 text-emerald-600" /> {isBn ? 'পরিশোধিত' : 'Paid'}
                                       </span>
                                     ) : sub.status === 'partial' ? (
                                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-800 border border-purple-300">
-                                        <Wallet className="h-3 w-3 text-purple-600" /> Partial
+                                        <Wallet className="h-3 w-3 text-purple-600" /> {isBn ? 'আংশিক' : 'Partial'}
                                       </span>
                                     ) : sub.status === 'received_slip' ? (
                                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-300">
-                                        <FileCheck className="h-3 w-3 text-blue-600" /> Slip Sent
+                                        <FileCheck className="h-3 w-3 text-blue-600" /> {isBn ? 'স্লিপ জমা' : 'Slip Sent'}
                                       </span>
                                     ) : sub.status === 'rejected' ? (
                                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-50 text-red-800 border border-red-300">
-                                        <XCircle className="h-3 w-3 text-red-600" /> Rejected
+                                        <XCircle className="h-3 w-3 text-red-600" /> {isBn ? 'প্রত্যাখ্যাত' : 'Rejected'}
                                       </span>
                                     ) : (
                                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-900 border border-amber-300">
-                                        <Clock className="h-3 w-3 text-amber-600" /> Due
+                                        <Clock className="h-3 w-3 text-amber-600" /> {isBn ? 'বকেয়া' : 'Due'}
                                       </span>
                                     )}
                                   </div>
@@ -1865,35 +1876,35 @@ export default function MemberTransactionsPage() {
                           </TableCell>
                           <TableCell className="px-3 py-3.5">
                             <Badge variant="outline" className="capitalize text-xs font-semibold">
-                              {t.payment_category ? t.payment_category.replace(/_/g, ' ') : t.type.replace(/_/g, ' ')}
+                              {formatPaymentCategoryI18n(t.payment_category || t.type, isBn)}
                             </Badge>
                           </TableCell>
                           <TableCell className="px-3 py-3.5 text-xs font-semibold text-slate-800">
-                            {t.month || t.description || '-'}
+                            {t.month ? formatMonthI18n(t.month, isBn) : (t.description || '-')}
                           </TableCell>
                           <TableCell className="px-3 py-3.5 font-bold text-slate-900 text-xs">
-                            BDT {Number(t.amount).toLocaleString()}
+                            {isBn ? '৳ ' : 'BDT '}{Number(t.amount).toLocaleString()}
                           </TableCell>
                           <TableCell className="px-3 py-3.5">
                             {isPartialPaid ? (
                               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-purple-50 text-purple-800 border border-purple-300 shadow-2xs">
-                                <Wallet className="h-3.5 w-3.5 text-purple-600" /> Partially Paid
+                                <Wallet className="h-3.5 w-3.5 text-purple-600" /> {isBn ? 'আংশিক পরিশোধিত' : 'Partially Paid'}
                               </span>
                             ) : isPartialPending ? (
                               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
-                                <Clock className="h-3.5 w-3.5 text-amber-600" /> Remaining Due
+                                <Clock className="h-3.5 w-3.5 text-amber-600" /> {isBn ? 'অবশিষ্ট বকেয়া' : 'Remaining Due'}
                               </span>
                             ) : t.status === 'paid' ? (
                               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 shadow-2xs">
-                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> Cleared
+                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" /> {isBn ? 'অনুমোদিত' : 'Cleared'}
                               </span>
                             ) : t.status === 'rejected' ? (
                               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-red-50 text-red-800 border border-red-300 shadow-2xs">
-                                <XCircle className="h-3.5 w-3.5 text-red-600" /> Rejected
+                                <XCircle className="h-3.5 w-3.5 text-red-600" /> {isBn ? 'প্রত্যাখ্যাত' : 'Rejected'}
                               </span>
                             ) : (
                               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
-                                <Clock className="h-3.5 w-3.5 text-amber-600" /> Due Pending
+                                <Clock className="h-3.5 w-3.5 text-amber-600" /> {isBn ? 'বকেয়া' : 'Due Pending'}
                               </span>
                             )}
                           </TableCell>
@@ -2661,7 +2672,7 @@ export default function MemberTransactionsPage() {
                               <CalendarIcon className="h-3.5 w-3.5 text-purple-600 shrink-0" />
                               <div className="flex flex-col min-w-0">
                                 <span className="font-medium text-slate-800 text-[11px] truncate">
-                                  {t.month || t.description || 'Monthly Subscription'}
+                                  {t.month ? formatMonthI18n(t.month, isBn) : t.description || (isBn ? 'মাসিক চাঁদা' : 'Monthly Subscription')}
                                 </span>
                                 {t.transaction_no && (
                                   <span className="text-[9px] font-mono text-slate-400">
