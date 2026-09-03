@@ -46,3 +46,17 @@ export function formatDate(dateStr: string | null | undefined): string {
     return String(dateStr).slice(0, 10);
   }
 }
+
+export function getSecurePhotoUrl(url: string | null | undefined, token?: string | null): string {
+  if (!url) return '';
+  if (url.startsWith('data:')) return url;
+
+  const activeToken = token || (typeof window !== 'undefined' ? localStorage.getItem('token') : null);
+
+  if (url.includes('/api/id-photos/') && activeToken && !url.includes('token=')) {
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}token=${encodeURIComponent(activeToken)}`;
+  }
+
+  return url;
+}
