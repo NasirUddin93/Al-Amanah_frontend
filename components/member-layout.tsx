@@ -2,16 +2,16 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { MEMBER_NAV_ITEMS } from '@/lib/nav';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import { logout } from '@/store/authSlice';
 import { useLogoutMutation, useGetNotificationsQuery } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { useLanguage } from '@/components/language-context';
+import { MEMBER_TRANSLATIONS } from '@/lib/member-translations';
 import {
   LayoutDashboard,
   CreditCard,
-  Receipt,
   User,
   Bell,
   LogOut,
@@ -21,6 +21,7 @@ import {
   X,
   ExternalLink,
   ChevronRight,
+  Globe,
 } from 'lucide-react';
 
 const ICON_MAP: Record<string, React.ElementType> = {
@@ -31,14 +32,6 @@ const ICON_MAP: Record<string, React.ElementType> = {
   '/member/notifications': Bell,
 };
 
-const BOTTOM_NAV_ITEMS = [
-  { label: 'Home', href: '/member', icon: LayoutDashboard },
-  { label: 'Dues & Pay', href: '/member/transactions', icon: CreditCard },
-  { label: 'Reports', href: '/member/reports', icon: FileText },
-  { label: 'Notices', href: '/member/notifications', icon: Bell, hasBadge: true },
-  { label: 'Profile', href: '/member/profile', icon: User },
-];
-
 export function MemberLayout({ children }: { children: React.ReactNode }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const user = useAppSelector((s) => s.auth.user);
@@ -47,6 +40,9 @@ export function MemberLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [logoutApi] = useLogoutMutation();
   const { data: notifsData } = useGetNotificationsQuery(undefined, { pollingInterval: 5000 });
+
+  const { lang, toggleLang, isBn } = useLanguage();
+  const t = MEMBER_TRANSLATIONS[lang];
 
   const unwrappedUser = (user as any)?.data || user;
   const memberNo =
@@ -62,10 +58,26 @@ export function MemberLayout({ children }: { children: React.ReactNode }) {
     router.push('/login');
   };
 
+  const navItems = [
+    { label: t.layout.nav.dashboard, href: '/member', icon: LayoutDashboard },
+    { label: t.layout.nav.transactions, href: '/member/transactions', icon: CreditCard },
+    { label: t.layout.nav.reports, href: '/member/reports', icon: FileText },
+    { label: t.layout.nav.notifications, href: '/member/notifications', icon: Bell, hasBadge: true },
+    { label: t.layout.nav.profile, href: '/member/profile', icon: User },
+  ];
+
+  const bottomNavItems = [
+    { label: t.layout.bottomNav.home, href: '/member', icon: LayoutDashboard },
+    { label: t.layout.bottomNav.dues, href: '/member/transactions', icon: CreditCard },
+    { label: t.layout.bottomNav.reports, href: '/member/reports', icon: FileText },
+    { label: t.layout.bottomNav.notices, href: '/member/notifications', icon: Bell, hasBadge: true },
+    { label: t.layout.bottomNav.profile, href: '/member/profile', icon: User },
+  ];
+
   return (
     <div className="min-h-screen w-full max-w-full bg-slate-100 flex flex-col lg:flex-row overflow-x-hidden">
       {/* ======================================================== */}
-      {/* 1. DESKTOP SIDEBAR (Screens >= 1024px) - 100% Intact    */}
+      {/* 1. DESKTOP SIDEBAR (Screens >= 1024px)                  */}
       {/* ======================================================== */}
       <aside className="hidden lg:flex w-64 h-screen sticky top-0 bg-slate-900 text-slate-100 flex-col shrink-0 print:hidden border-r border-slate-800 shadow-xl z-20">
         {/* Brand Header */}
@@ -75,10 +87,21 @@ export function MemberLayout({ children }: { children: React.ReactNode }) {
               <Building2 className="h-5 w-5" />
             </div>
             <div className="min-w-0">
-              <div className="text-sm font-bold text-white tracking-wide truncate">Al-Amanah</div>
-              <div className="text-[10px] text-emerald-400 font-medium tracking-wider uppercase truncate">Member Portal</div>
+              <div className="text-sm font-bold text-white tracking-wide truncate">{t.layout.brand}</div>
+              <div className="text-[10px] text-emerald-400 font-medium tracking-wider uppercase truncate">{t.layout.portalSubtitle}</div>
             </div>
           </div>
+
+          {/* Desktop Language Toggle */}
+          <button
+            type="button"
+            onClick={toggleLang}
+            className="px-2 py-1 rounded-md text-[11px] font-bold bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 transition-colors flex items-center gap-1 cursor-pointer shadow-2xs shrink-0"
+            title={isBn ? 'Switch to English' : 'বাংলায় রূপান্তর করুন'}
+          >
+            <Globe className="h-3 w-3 text-emerald-400" />
+            <span>{isBn ? 'EN' : 'বাংলা'}</span>
+          </button>
         </div>
 
         {/* Quick Website Switcher */}
@@ -91,7 +114,7 @@ export function MemberLayout({ children }: { children: React.ReactNode }) {
           >
             <span className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              View Live Website
+              {t.layout.viewLiveWebsite}
             </span>
             <span className="text-[10px] text-emerald-300 font-bold group-hover:translate-x-0.5 transition-transform">↗</span>
           </Link>
@@ -99,8 +122,8 @@ export function MemberLayout({ children }: { children: React.ReactNode }) {
 
         {/* Navigation Menu */}
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-          {MEMBER_NAV_ITEMS.map((item) => {
-            const Icon = ICON_MAP[item.href] || LayoutDashboard;
+          {navItems.map((item) => {
+            const Icon = item.icon;
             const isActive = pathname === item.href || (item.href !== '/member' && pathname.startsWith(item.href));
 
             return (
@@ -137,7 +160,7 @@ export function MemberLayout({ children }: { children: React.ReactNode }) {
             <div className="min-w-0 flex-1">
               <div className="text-xs font-bold text-slate-100 truncate">{unwrappedUser?.name || 'Member'}</div>
               <div className="text-[10px] text-emerald-400 font-mono font-bold truncate">
-                ID: {memberNo}
+                {t.layout.memberIdLabel} {memberNo}
               </div>
             </div>
           </div>
@@ -149,7 +172,7 @@ export function MemberLayout({ children }: { children: React.ReactNode }) {
             className="w-full text-xs font-semibold text-slate-400 hover:text-red-300 hover:bg-red-950/40 border border-slate-800 hover:border-red-900/50 cursor-pointer h-8 transition-colors flex items-center justify-center gap-1.5"
           >
             <LogOut className="h-3.5 w-3.5" />
-            <span>Sign Out</span>
+            <span>{t.layout.signOut}</span>
           </Button>
         </div>
       </aside>
@@ -171,13 +194,24 @@ export function MemberLayout({ children }: { children: React.ReactNode }) {
               আ
             </div>
             <div className="min-w-0">
-              <div className="text-xs font-bold text-white leading-tight truncate">Al-Amanah</div>
-              <div className="text-[9px] text-emerald-400 font-mono leading-tight">Member Portal</div>
+              <div className="text-xs font-bold text-white leading-tight truncate">{t.layout.brand}</div>
+              <div className="text-[9px] text-emerald-400 font-mono leading-tight">{t.layout.portalSubtitle}</div>
             </div>
           </Link>
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Mobile Top Language Switcher */}
+          <button
+            type="button"
+            onClick={toggleLang}
+            className="px-2 py-1 rounded-md text-[11px] font-bold bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 transition-colors flex items-center gap-1 cursor-pointer"
+            title={isBn ? 'Switch to English' : 'বাংলায় রূপান্তর করুন'}
+          >
+            <Globe className="h-3 w-3 text-emerald-400" />
+            <span>{isBn ? 'EN' : 'বাংলা'}</span>
+          </button>
+
           <Link
             href="/member/notifications"
             className="relative p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
@@ -213,16 +247,25 @@ export function MemberLayout({ children }: { children: React.ReactNode }) {
                   আ
                 </div>
                 <div>
-                  <div className="text-xs font-bold text-white">Al-Amanah Society</div>
-                  <div className="text-[10px] text-emerald-400 font-mono">ID: {memberNo}</div>
+                  <div className="text-xs font-bold text-white">{t.layout.brand}</div>
+                  <div className="text-[10px] text-emerald-400 font-mono">{t.layout.memberIdLabel} {memberNo}</div>
                 </div>
               </div>
-              <button
-                onClick={() => setDrawerOpen(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={toggleLang}
+                  className="px-2 py-1 rounded-md text-[11px] font-bold bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700"
+                >
+                  {isBn ? 'EN' : 'বাং'}
+                </button>
+                <button
+                  onClick={() => setDrawerOpen(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
             </div>
 
             {/* Member Identity Card */}
@@ -233,8 +276,8 @@ export function MemberLayout({ children }: { children: React.ReactNode }) {
 
             {/* Navigation Links */}
             <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-              {MEMBER_NAV_ITEMS.map((item) => {
-                const Icon = ICON_MAP[item.href] || LayoutDashboard;
+              {navItems.map((item) => {
+                const Icon = item.icon;
                 const isActive = pathname === item.href || (item.href !== '/member' && pathname.startsWith(item.href));
 
                 return (
@@ -271,7 +314,7 @@ export function MemberLayout({ children }: { children: React.ReactNode }) {
                   className="flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-semibold text-emerald-400 bg-emerald-950/40 border border-emerald-800/50 hover:bg-emerald-900/40"
                 >
                   <span className="flex items-center gap-2">
-                    <ExternalLink className="h-3.5 w-3.5" /> View Public Site
+                    <ExternalLink className="h-3.5 w-3.5" /> {t.layout.viewLiveWebsite}
                   </span>
                   <ChevronRight className="h-3.5 w-3.5 text-emerald-400" />
                 </Link>
@@ -286,7 +329,7 @@ export function MemberLayout({ children }: { children: React.ReactNode }) {
                 onClick={handleLogout}
                 className="w-full text-xs font-bold text-red-400 hover:text-red-300 hover:bg-red-950/50 border border-red-900/40 h-8.5 cursor-pointer flex items-center justify-center gap-1.5"
               >
-                <LogOut className="h-3.5 w-3.5" /> Sign Out
+                <LogOut className="h-3.5 w-3.5" /> {t.layout.signOut}
               </Button>
             </div>
           </div>
@@ -304,7 +347,7 @@ export function MemberLayout({ children }: { children: React.ReactNode }) {
       {/* 5. PERSISTENT MOBILE BOTTOM NAVIGATION (Screens < 1024px) */}
       {/* ======================================================== */}
       <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 h-16 pb-safe flex items-center justify-around shadow-lg print:hidden">
-        {BOTTOM_NAV_ITEMS.map((item) => {
+        {bottomNavItems.map((item) => {
           const Icon = item.icon;
           const isActive = pathname === item.href || (item.href !== '/member' && pathname.startsWith(item.href));
 

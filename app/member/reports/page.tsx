@@ -9,6 +9,8 @@ import {
 } from '@/lib/api';
 import { useAppSelector } from '@/store/hooks';
 import type { Receipt, Transaction, User } from '@/types';
+import { useLanguage } from '@/components/language-context';
+import { MEMBER_TRANSLATIONS } from '@/lib/member-translations';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -50,6 +52,7 @@ import {
 import { ReportPrintArea, type PrintSection, type PrintingReportData } from '@/components/report-print';
 import { ReceiptPrintArea } from '@/components/receipt-print';
 import { ReceiptSlipThumbnail, MagnifiableModalImage } from '@/components/receipt-magnifier';
+import { formatMonthI18n, formatPaymentCategoryI18n, formatDemandTitleI18n, toBengaliDigits } from '@/lib/utils';
 
 interface MemberReceiptItem {
   id: string | number;
@@ -213,6 +216,8 @@ export default function MemberReportsPage() {
 }
 
 function MemberReportHierarchyManagerContent() {
+  const { lang, isBn } = useLanguage();
+  const t = MEMBER_TRANSLATIONS[lang];
   const currentUser = useAppSelector((s) => s.auth.user);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'partial' | 'received_slip' | 'pending' | 'rejected'>('all');
@@ -1214,10 +1219,10 @@ function MemberReportHierarchyManagerContent() {
         <div>
           <h1 className="text-2xl font-black tracking-tight text-slate-900 flex items-center gap-2.5">
             <FileText className="h-7 w-7 text-emerald-700" />
-            Financial Reports &amp; Statements
+            {t.reports.pageTitle}
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Consolidated financial audit, payment breakdowns, and dues summary for your connected accounts.
+            {t.reports.pageSub}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -1226,7 +1231,7 @@ function MemberReportHierarchyManagerContent() {
             className="bg-emerald-700 hover:bg-emerald-800 text-white gap-2 h-10 px-4 text-xs sm:text-sm font-bold shadow-xs cursor-pointer"
           >
             <Printer className="h-4 w-4" />
-            Print Complete Report
+            {isBn ? 'সম্পূর্ণ প্রতিবেদন প্রিন্ট' : 'Print Complete Report'}
           </Button>
         </div>
       </div>
@@ -1237,7 +1242,10 @@ function MemberReportHierarchyManagerContent() {
           <div className="flex items-center gap-2">
             <Users className="h-4 w-4 text-purple-700 shrink-0" />
             <span>
-              <strong>Merged Account View:</strong> {hierarchyData.length} Connected Member Accounts Available. Expand any member to inspect individual dues and payment statements.
+              <strong>{isBn ? 'যৌথ অ্যাকাউন্ট ভিউ:' : 'Merged Account View:'}</strong>{' '}
+              {isBn
+                ? `${hierarchyData.length} টি সংযুক্ত সদস্য অ্যাকাউন্ট উপলব্ধ। স্বতন্ত্র চাঁদা ও লেনদেন বিবরণী দেখতে যেকোনো সদস্যকে প্রসারিত করুন।`
+                : `${hierarchyData.length} Connected Member Accounts Available. Expand any member to inspect individual dues and payment statements.`}
             </span>
           </div>
           <div className="flex items-center gap-2 shrink-0 font-semibold">
@@ -1245,14 +1253,14 @@ function MemberReportHierarchyManagerContent() {
               onClick={expandAll}
               className="text-purple-700 hover:text-purple-900 hover:underline cursor-pointer"
             >
-              Expand All
+              {isBn ? 'সবগুলো প্রসারিত করুন' : 'Expand All'}
             </button>
             <span className="text-purple-300">|</span>
             <button
               onClick={collapseAll}
               className="text-purple-700 hover:text-purple-900 hover:underline cursor-pointer"
             >
-              Collapse All
+              {isBn ? 'সংকুচিত করুন' : 'Collapse All'}
             </button>
           </div>
         </div>
@@ -1264,14 +1272,14 @@ function MemberReportHierarchyManagerContent() {
         <Card className="border-emerald-200/80 bg-gradient-to-br from-emerald-50/80 via-white to-emerald-50/30 shadow-2xs">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-emerald-800 uppercase tracking-wide">Total Paid</span>
+              <span className="text-xs font-bold text-emerald-800 uppercase tracking-wide">{isBn ? 'মোট পরিশোধিত' : 'Total Paid'}</span>
               <CheckCircle2 className="h-4 w-4 text-emerald-600" />
             </div>
             <div className="text-xl sm:text-2xl font-black text-emerald-950 mt-2 font-mono">
-              BDT {stats.totalClearedAmount.toLocaleString()}
+              {isBn ? '৳ ' : 'BDT '}{stats.totalClearedAmount.toLocaleString()}
             </div>
             <div className="text-[11px] text-emerald-700 font-medium mt-1">
-              {stats.currentClearedCount} fully cleared demands
+              {stats.currentClearedCount} {isBn ? 'টি অনুমোদিত চাঁদা' : 'fully cleared demands'}
             </div>
           </CardContent>
         </Card>
@@ -1280,14 +1288,14 @@ function MemberReportHierarchyManagerContent() {
         <Card className="border-purple-200/80 bg-gradient-to-br from-purple-50/80 via-white to-purple-50/30 shadow-2xs">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-purple-800 uppercase tracking-wide">Partially Paid</span>
+              <span className="text-xs font-bold text-purple-800 uppercase tracking-wide">{isBn ? 'আংশিক পরিশোধিত' : 'Partially Paid'}</span>
               <Wallet className="h-4 w-4 text-purple-600" />
             </div>
             <div className="text-xl sm:text-2xl font-black text-purple-950 mt-2 font-mono">
-              BDT {stats.partialCollectedAmount.toLocaleString()}
+              {isBn ? '৳ ' : 'BDT '}{stats.partialCollectedAmount.toLocaleString()}
             </div>
             <div className="text-[11px] text-purple-700 font-medium mt-1">
-              {stats.currentPartialCount} partial installments
+              {stats.currentPartialCount} {isBn ? 'টি আংশিক কিস্তি' : 'partial installments'}
             </div>
           </CardContent>
         </Card>
@@ -1296,14 +1304,14 @@ function MemberReportHierarchyManagerContent() {
         <Card className="border-blue-200/80 bg-gradient-to-br from-blue-50/80 via-white to-blue-50/30 shadow-2xs">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-blue-800 uppercase tracking-wide">Slips Under Review</span>
+              <span className="text-xs font-bold text-blue-800 uppercase tracking-wide">{isBn ? 'যাচাইাধীন জমার স্লিপ' : 'Slips Under Review'}</span>
               <FileCheck className="h-4 w-4 text-blue-600" />
             </div>
             <div className="text-xl sm:text-2xl font-black text-blue-950 mt-2 font-mono">
-              BDT {stats.receivedSlipsAmount.toLocaleString()}
+              {isBn ? '৳ ' : 'BDT '}{stats.receivedSlipsAmount.toLocaleString()}
             </div>
             <div className="text-[11px] text-blue-700 font-medium mt-1">
-              {stats.currentReceivedCount} slips awaiting review
+              {stats.currentReceivedCount} {isBn ? 'টি পর্যালোচনার অপেক্ষায়' : 'slips awaiting review'}
             </div>
           </CardContent>
         </Card>
@@ -1312,14 +1320,14 @@ function MemberReportHierarchyManagerContent() {
         <Card className="border-amber-200/80 bg-gradient-to-br from-amber-50/80 via-white to-amber-50/30 shadow-2xs">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-amber-900 uppercase tracking-wide">Total Outstanding</span>
+              <span className="text-xs font-bold text-amber-900 uppercase tracking-wide">{isBn ? 'মোট বকেয়া চাঁদা' : 'Total Outstanding'}</span>
               <Clock className="h-4 w-4 text-amber-700" />
             </div>
             <div className="text-xl sm:text-2xl font-black text-amber-950 mt-2 font-mono">
-              BDT {stats.duePendingAmount.toLocaleString()}
+              {isBn ? '৳ ' : 'BDT '}{stats.duePendingAmount.toLocaleString()}
             </div>
             <div className="text-[11px] text-amber-800 font-medium mt-1">
-              {stats.currentDueCount} pending payment dues
+              {stats.currentDueCount} {isBn ? 'টি প্রদেয় বকেয়া' : 'pending payment dues'}
             </div>
           </CardContent>
         </Card>
@@ -1328,14 +1336,14 @@ function MemberReportHierarchyManagerContent() {
         <Card className="border-red-200/80 bg-gradient-to-br from-red-50/80 via-white to-red-50/30 shadow-2xs col-span-2 lg:col-span-1">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-red-800 uppercase tracking-wide">Slips Declined</span>
+              <span className="text-xs font-bold text-red-800 uppercase tracking-wide">{isBn ? 'প্রত্যাখ্যাত স্লিপ' : 'Slips Declined'}</span>
               <XCircle className="h-4 w-4 text-red-600" />
             </div>
             <div className="text-xl sm:text-2xl font-black text-red-950 mt-2 font-mono">
               {stats.currentRejectedCount}
             </div>
             <div className="text-[11px] text-red-700 font-medium mt-1">
-              Requires slip re-upload
+              {isBn ? 'পুনরায় আপলোড প্রয়োজন' : 'Requires slip re-upload'}
             </div>
           </CardContent>
         </Card>
@@ -1349,11 +1357,11 @@ function MemberReportHierarchyManagerContent() {
             <div className="flex items-center gap-1.5 flex-wrap w-full md:w-auto">
               {(
                 [
-                  { id: 'all', label: 'All Records' },
-                  { id: 'paid', label: 'Cleared' },
-                  { id: 'partial', label: 'Partial' },
-                  { id: 'received_slip', label: 'Receipt Sent' },
-                  { id: 'pending', label: 'Due Pending' },
+                  { id: 'all', label: isBn ? 'সকল রেকর্ড' : 'All Records' },
+                  { id: 'paid', label: isBn ? 'অনুমোদিত' : 'Cleared' },
+                  { id: 'partial', label: isBn ? 'আংশিক' : 'Partial' },
+                  { id: 'received_slip', label: isBn ? 'স্লিপ জমা' : 'Receipt Sent' },
+                  { id: 'pending', label: isBn ? 'বকেয়া' : 'Due Pending' },
                   { id: 'rejected', label: 'Rejected' },
                 ] as const
               ).map((tab) => (
@@ -1527,7 +1535,7 @@ function MemberReportHierarchyManagerContent() {
                                 <div>
                                   <div className="flex items-center gap-2">
                                     <span className="font-bold text-slate-900 text-sm">
-                                      {monthGroup.monthLabel}
+                                      {isBn ? formatMonthI18n(monthGroup.monthLabel, true) : monthGroup.monthLabel}
                                     </span>
                                     {monthGroup.campaignTrxNo && (
                                       <span className="font-mono text-[11px] text-slate-500">
@@ -1541,13 +1549,13 @@ function MemberReportHierarchyManagerContent() {
                               <div className="flex items-center gap-2.5 self-end sm:self-auto flex-wrap">
                                 <div className="flex items-center gap-2 text-xs font-mono">
                                   <span className="text-emerald-800 font-bold">
-                                    Paid: BDT {monthGroup.totalPaid.toLocaleString()}
+                                    {isBn ? 'জমা:' : 'Paid:'} {isBn ? '৳ ' : 'BDT '}{monthGroup.totalPaid.toLocaleString()}
                                   </span>
                                   {monthGroup.totalDue > 0 && (
                                     <>
                                       <span className="text-slate-300">•</span>
                                       <span className="text-amber-800 font-bold">
-                                        Due: BDT {monthGroup.totalDue.toLocaleString()}
+                                        {isBn ? 'বকেয়া:' : 'Due:'} {isBn ? '৳ ' : 'BDT '}{monthGroup.totalDue.toLocaleString()}
                                       </span>
                                     </>
                                   )}
@@ -1558,7 +1566,7 @@ function MemberReportHierarchyManagerContent() {
                                   variant="outline"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    handlePrintMonth(member, monthGroup);
+                    handlePrintMonth(member, monthGroup);
                                   }}
                                   className="h-7 px-2.5 text-xs font-semibold border-slate-200 bg-white hover:bg-emerald-50 hover:text-emerald-800 cursor-pointer shadow-2xs gap-1"
                                   title="Print period breakdown report"
@@ -1582,12 +1590,12 @@ function MemberReportHierarchyManagerContent() {
                                 <Table className="w-full">
                                   <TableHeader className="bg-slate-50/50">
                                     <TableRow className="text-xs">
-                                      <TableHead className="text-center w-[16%]">Reference ID</TableHead>
-                                      <TableHead className="text-center w-[14%]">Date</TableHead>
-                                      <TableHead className="text-center w-[22%]">Transaction / Demand</TableHead>
-                                      <TableHead className="text-center w-[16%]">Payment Slip / Proof</TableHead>
-                                      <TableHead className="text-center w-[14%]">Amount</TableHead>
-                                      <TableHead className="text-center w-[18%]">Status &amp; Actions</TableHead>
+                                      <TableHead className="text-center w-[16%]">{isBn ? 'রেফারেন্স আইডি' : 'Reference ID'}</TableHead>
+                                      <TableHead className="text-center w-[14%]">{isBn ? 'তারিখ' : 'Date'}</TableHead>
+                                      <TableHead className="text-center w-[22%]">{isBn ? 'লেনদেন / চাঁদা' : 'Transaction / Demand'}</TableHead>
+                                      <TableHead className="text-center w-[16%]">{isBn ? 'পেমেন্ট স্লিপ' : 'Payment Slip / Proof'}</TableHead>
+                                      <TableHead className="text-center w-[14%]">{isBn ? 'পরিমাণ' : 'Amount'}</TableHead>
+                                      <TableHead className="text-center w-[18%]">{isBn ? 'অবস্থা ও ব্যবস্থা' : 'Status & Actions'}</TableHead>
                                     </TableRow>
                                   </TableHeader>
                                   <TableBody>
@@ -1619,7 +1627,7 @@ function MemberReportHierarchyManagerContent() {
                                           <TableCell className="p-3 text-center align-middle">
                                             <div className="flex flex-col items-center">
                                               <span className="font-bold text-slate-900 truncate max-w-[200px]" title={item.monthOrDesc}>
-                                                {item.monthOrDesc}
+                                                {formatMonthI18n(item.monthOrDesc, isBn)}
                                               </span>
                                               <span className="font-mono text-[10px] text-slate-500">
                                                 #{item.transactionNo}
@@ -1647,36 +1655,36 @@ function MemberReportHierarchyManagerContent() {
                                                 />
                                               </div>
                                             ) : (
-                                              <span className="text-slate-400 text-xs italic">No slip uploaded</span>
+                                              <span className="text-slate-400 text-xs italic">{isBn ? 'স্লিপ জমা নেই' : 'No slip uploaded'}</span>
                                             )}
                                           </TableCell>
 
-<TableCell className="p-3 text-center align-middle font-bold text-slate-900 font-mono">
-                                            BDT {item.amount.toLocaleString()}
+                                          <TableCell className="p-3 text-center align-middle font-bold text-slate-900 font-mono">
+                                            {isBn ? '৳ ' : 'BDT '}{item.amount.toLocaleString()}
                                           </TableCell>
 
                                           <TableCell className="p-3 text-center align-middle whitespace-nowrap">
                                             <div className="flex items-center justify-center gap-1.5 flex-wrap">
                                               {isPaid ? (
                                                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 shadow-2xs">
-                                                  <CheckCircle2 className="h-3 w-3 text-emerald-600" /> Cleared
+                                                  <CheckCircle2 className="h-3 w-3 text-emerald-600" /> {isBn ? 'অনুমোদিত' : 'Cleared'}
                                                 </span>
                                               ) : isSlipPending ? (
                                                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-800 border border-blue-300 shadow-2xs">
                                                   <FileCheck className="h-3 w-3 text-blue-600" />
-                                                  Receipt Sent
+                                                  {isBn ? 'স্লিপ জমা' : 'Receipt Sent'}
                                                 </span>
                                               ) : isPartial ? (
                                                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-purple-50 text-purple-800 border border-purple-300 shadow-2xs">
-                                                  <Wallet className="h-3 w-3 text-purple-600" /> Remaining Due
+                                                  <Wallet className="h-3 w-3 text-purple-600" /> {isBn ? 'অবশিষ্ট বকেয়া' : 'Remaining Due'}
                                                 </span>
                                               ) : isRejected ? (
                                                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-red-50 text-red-800 border border-red-300 shadow-2xs">
-                                                  <XCircle className="h-3 w-3 text-red-600" /> Slip Rejected
+                                                  <XCircle className="h-3 w-3 text-red-600" /> {isBn ? 'প্রত্যাখ্যাত' : 'Slip Rejected'}
                                                 </span>
                                               ) : (
                                                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
-                                                  <Clock className="h-3 w-3 text-amber-600" /> Due Pending
+                                                  <Clock className="h-3 w-3 text-amber-600" /> {isBn ? 'বকেয়া' : 'Due Pending'}
                                                 </span>
                                               )}
 
@@ -1694,7 +1702,7 @@ function MemberReportHierarchyManagerContent() {
                                                   className="h-6.5 px-2 text-[11px] border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 cursor-pointer shadow-2xs gap-1"
                                                   title="Print official receipt"
                                                 >
-                                                  <Printer className="h-3 w-3" /> Print
+                                                  <Printer className="h-3 w-3" /> {isBn ? 'প্রিন্ট' : 'Print'}
                                                 </Button>
                                               )}
 
@@ -1814,12 +1822,14 @@ function MemberReportHierarchyManagerContent() {
           <div className="space-y-4 py-2 text-xs">
             <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
               <div className="font-bold text-slate-900 text-sm">
-                {selectedTrxForUpload.month ? `Monthly Subscription (${selectedTrxForUpload.month})` : selectedTrxForUpload.description || 'Society Demand'}
+                {selectedTrxForUpload.month
+                  ? `${isBn ? 'মাসিক চাঁদা' : 'Monthly Subscription'} (${formatMonthI18n(selectedTrxForUpload.month, isBn)})`
+                  : selectedTrxForUpload.description || (isBn ? 'সোসাইটি চাঁদা' : 'Society Demand')}
               </div>
               <div className="flex items-center justify-between text-slate-600 mt-1">
-                <span>Assigned Due:</span>
+                <span>{isBn ? 'নির্ধারিত বকেয়া:' : 'Assigned Due:'}</span>
                 <span className="font-bold text-slate-900 font-mono">
-                  BDT {Number(selectedTrxForUpload.amount).toLocaleString()}
+                  {isBn ? '৳ ' : 'BDT '}{Number(selectedTrxForUpload.amount).toLocaleString()}
                 </span>
               </div>
             </div>

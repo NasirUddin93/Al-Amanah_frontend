@@ -19,6 +19,8 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { getSecurePhotoUrl } from '@/lib/utils';
 import { SecureImage } from '@/components/secure-image';
+import { useLanguage } from '@/components/language-context';
+import { MEMBER_TRANSLATIONS } from '@/lib/member-translations';
 import {
   Dialog,
   DialogContent,
@@ -156,6 +158,8 @@ export default function MemberProfilePage() {
 }
 
 function MemberProfileContent() {
+  const { lang, isBn } = useLanguage();
+  const t = MEMBER_TRANSLATIONS[lang];
   const dispatch = useAppDispatch();
   const reduxUser = useAppSelector((s) => s.auth.user);
   const { data: freshUser, refetch: refetchMe } = useMeQuery(undefined, { pollingInterval: 10000 });
@@ -390,10 +394,12 @@ function MemberProfileContent() {
         <div>
           <h1 className="text-2xl font-black tracking-tight text-slate-900 flex items-center gap-2.5">
             <Building2 className="h-7 w-7 text-emerald-700" />
-            My Official Member Profile
+            {isBn ? 'আমার অফিসিয়াল সদস্য প্রোফাইল' : 'My Official Member Profile'}
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Your official society registration records, identity documentation, contact details, and joint merged accounts.
+            {isBn
+              ? 'আপনার প্রাতিষ্ঠানিক সদস্যপদ, পরিচয়পত্র, যোগাযোগের তথ্য এবং যৌথ অ্যাকাউন্টের বিবরণ।'
+              : 'Your official society registration records, identity documentation, contact details, and joint merged accounts.'}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -403,7 +409,7 @@ function MemberProfileContent() {
             className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold cursor-pointer gap-2 h-10 px-5 text-xs sm:text-sm rounded-xl shadow-xs"
           >
             <Pencil className="h-4 w-4" />
-            <span>Edit Profile</span>
+            <span>{t.profile.btnEdit}</span>
           </Button>
         </div>
       </div>
@@ -431,7 +437,13 @@ function MemberProfileContent() {
               <div className="relative z-10 p-4 bg-gradient-to-b from-black/85 via-black/40 to-transparent flex items-center justify-between pointer-events-auto">
                 <span className="text-xs font-bold text-white uppercase tracking-wider bg-emerald-700 px-3.5 py-1.5 rounded-full shadow-md flex items-center gap-1.5">
                   <ImageIcon className="h-4 w-4" />
-                  {userPhotos.length > 1 ? `Document ${viewPhotoIndex + 1} of ${userPhotos.length}` : 'Official ID Document'}
+                  {userPhotos.length > 1
+                    ? isBn
+                      ? `ডকুমেন্ট ${viewPhotoIndex + 1} / ${userPhotos.length}`
+                      : `Document ${viewPhotoIndex + 1} of ${userPhotos.length}`
+                    : isBn
+                    ? 'অফিসিয়াল আইডি ডকুমেন্ট'
+                    : 'Official ID Document'}
                 </span>
                 <Button
                   type="button"
@@ -440,7 +452,7 @@ function MemberProfileContent() {
                   onClick={() => openEnlargeModal(userPhotos, viewPhotoIndex)}
                   className="h-8 text-xs font-bold bg-white/90 hover:bg-white text-slate-900 cursor-pointer gap-1.5 shadow-md"
                 >
-                  <Maximize2 className="h-3.5 w-3.5" /> Enlarge
+                  <Maximize2 className="h-3.5 w-3.5" /> {isBn ? 'বড় করে দেখুন' : 'Enlarge'}
                 </Button>
               </div>
 
@@ -527,17 +539,17 @@ function MemberProfileContent() {
                 </h2>
                 <div className="flex items-center gap-2.5 flex-wrap">
                   <span className="font-mono text-xs md:text-sm font-extrabold text-emerald-900 bg-emerald-50 border border-emerald-300 px-3 py-1 rounded-lg shadow-2xs">
-                    ID: {memberNo}
+                    {t.profile.memberId}: {memberNo}
                   </span>
                   <Badge variant="secondary" className="capitalize text-xs md:text-sm font-bold px-3 py-1">
-                    {activeUser.role?.name?.replace(/_/g, ' ') || 'Member'}
+                    {isBn ? 'সম্মানিত সদস্য' : activeUser.role?.name?.replace(/_/g, ' ') || 'Member'}
                   </Badge>
                   <Badge variant={activeUser.is_active ? "default" : "destructive"} className="text-xs md:text-sm font-bold px-3 py-1 bg-emerald-600 text-white">
-                    {activeUser.is_active ? 'Active Account' : 'Inactive'}
+                    {activeUser.is_active ? (isBn ? 'সক্রিয় অ্যাকাউন্ট' : 'Active Account') : (isBn ? 'নিষ্ক্রিয়' : 'Inactive')}
                   </Badge>
                   {userPhotos.length > 0 && (
                     <Badge variant="outline" className="text-xs md:text-sm border-emerald-300 text-emerald-800 bg-emerald-50/70 font-bold gap-1.5 px-3 py-1">
-                      <ImageIcon className="h-3.5 w-3.5" /> {userPhotos.length} {userPhotos.length === 1 ? 'Document' : 'Documents'}
+                      <ImageIcon className="h-3.5 w-3.5" /> {userPhotos.length} {isBn ? 'ডকুমেন্ট' : (userPhotos.length === 1 ? 'Document' : 'Documents')}
                     </Badge>
                   )}
                 </div>
@@ -554,12 +566,12 @@ function MemberProfileContent() {
           <div className="p-4 md:p-5 bg-slate-50/90 border border-slate-200 rounded-2xl space-y-3.5 shadow-2xs">
             <div className="text-xs md:text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 border-b border-slate-200 pb-2">
               <Mail className="h-4 w-4 text-emerald-700" />
-              <span>Contact &amp; Location Information</span>
+              <span>{isBn ? 'যোগাযোগ ও ঠিকানার বিবরণ' : 'Contact & Location Information'}</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <span className="text-slate-500 block text-xs md:text-sm font-medium">Email Address:</span>
+                <span className="text-slate-500 block text-xs md:text-sm font-medium">{t.profile.email}:</span>
                 <span className="font-semibold text-slate-900 flex items-center gap-1.5 mt-1 text-sm md:text-base">
                   <Mail className="h-4 w-4 text-slate-400 shrink-0" />
                   <a href={`mailto:${activeUser.email}`} className="text-emerald-700 hover:underline">
@@ -569,7 +581,7 @@ function MemberProfileContent() {
               </div>
 
               <div>
-                <span className="text-slate-500 block text-xs md:text-sm font-medium">Phone Number:</span>
+                <span className="text-slate-500 block text-xs md:text-sm font-medium">{t.profile.phone}:</span>
                 <span className="font-semibold text-slate-900 flex items-center gap-1.5 mt-1 text-sm md:text-base">
                   <Phone className="h-4 w-4 text-emerald-600 shrink-0" />
                   {activeUser.member_profile?.phone ? (
@@ -577,16 +589,16 @@ function MemberProfileContent() {
                       {activeUser.member_profile.phone}
                     </a>
                   ) : (
-                    <span className="text-slate-400 italic font-normal">Not provided</span>
+                    <span className="text-slate-400 italic font-normal">{isBn ? 'প্রদান করা হয়নি' : 'Not provided'}</span>
                   )}
                 </span>
               </div>
 
               <div className="col-span-1 sm:col-span-2">
-                <span className="text-slate-500 block text-xs md:text-sm font-medium">Physical / Postal Address:</span>
+                <span className="text-slate-500 block text-xs md:text-sm font-medium">{isBn ? 'বর্তমান ও ডাক যোগাযোগের ঠিকানা:' : 'Physical / Postal Address:'}</span>
                 <span className="font-semibold text-slate-800 flex items-start gap-2 mt-1 text-sm md:text-base">
                   <MapPin className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
-                  <span>{activeUser.member_profile?.address || <span className="text-slate-400 italic font-normal">No address recorded</span>}</span>
+                  <span>{activeUser.member_profile?.address || <span className="text-slate-400 italic font-normal">{isBn ? 'কোনো ঠিকানা লিপিবদ্ধ নেই' : 'No address recorded'}</span>}</span>
                 </span>
               </div>
             </div>
@@ -598,19 +610,19 @@ function MemberProfileContent() {
             <div className="p-4 md:p-5 bg-slate-50/90 border border-slate-200 rounded-2xl space-y-2.5 shadow-2xs">
               <div className="text-xs md:text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2 border-b border-slate-200 pb-2">
                 <ShieldAlert className="h-4 w-4 text-emerald-700" />
-                <span>Role &amp; Permissions</span>
+                <span>{isBn ? 'সদস্য স্তর ও পদমর্যাদা' : 'Role & Permissions'}</span>
               </div>
               <div className="space-y-2 text-sm md:text-base">
                 <div>
-                  <span className="text-slate-500 block text-xs md:text-sm font-medium">Assigned Role:</span>
+                  <span className="text-slate-500 block text-xs md:text-sm font-medium">{isBn ? 'নির্ধারিত পদ:' : 'Assigned Role:'}</span>
                   <span className="font-extrabold text-emerald-950 capitalize text-sm md:text-base">
-                    {activeUser.role?.name?.replace(/_/g, ' ') || 'Member'}
+                    {isBn ? 'সাধারণ সদস্য' : activeUser.role?.name?.replace(/_/g, ' ') || 'Member'}
                   </span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block text-xs md:text-sm font-medium">Account Status:</span>
+                  <span className="text-slate-500 block text-xs md:text-sm font-medium">{isBn ? 'অ্যাকাউন্ট স্ট্যাটাস:' : 'Account Status:'}</span>
                   <span className="inline-flex items-center gap-1.5 text-emerald-800 font-bold text-xs md:text-sm mt-0.5">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-600" /> Active &amp; Good Standing
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" /> {isBn ? 'সক্রিয় ও নিয়মিত' : 'Active & Good Standing'}
                   </span>
                 </div>
               </div>
@@ -620,17 +632,17 @@ function MemberProfileContent() {
             <div className="p-4 md:p-5 bg-emerald-50/50 border border-emerald-200 rounded-2xl space-y-2.5 shadow-2xs">
               <div className="text-xs md:text-sm font-bold text-emerald-950 uppercase tracking-wider flex items-center gap-2 border-b border-emerald-200 pb-2">
                 <Sparkles className="h-4 w-4 text-emerald-700" />
-                <span>Society Record</span>
+                <span>{isBn ? 'সোসাইটি সঞ্চয় রেকর্ড' : 'Society Record'}</span>
               </div>
               <div className="space-y-2">
                 <div>
-                  <span className="text-slate-600 block text-xs md:text-sm font-medium">Share Capital Value:</span>
+                  <span className="text-slate-600 block text-xs md:text-sm font-medium">{isBn ? 'শেয়ার মূলধনের পরিমাণ:' : 'Share Capital Value:'}</span>
                   <span className="font-mono font-extrabold text-emerald-950 text-base md:text-lg">
-                    BDT {Number(activeUser.member_profile?.share_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {isBn ? '৳ ' : 'BDT '}{Number(activeUser.member_profile?.share_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
                 <div>
-                  <span className="text-slate-600 block text-xs md:text-sm font-medium">Database Record:</span>
+                  <span className="text-slate-600 block text-xs md:text-sm font-medium">{isBn ? 'ডাটাবেজ রেকর্ড:' : 'Database Record:'}</span>
                   <span className="font-mono font-bold text-slate-800 text-sm md:text-base">#{activeUser.id}</span>
                 </div>
               </div>
